@@ -89,7 +89,7 @@ var page = await dbContext.TodoItems
     .ToPageAsync(subjectId, "TODO_READ", pageSize: 20, cursor, cancellationToken);
 ```
 
-`ToPageAsync` reads the query in its order and checks rows with the SQL Server function that walks resource ancestors and matches grants. The todo entity declares that order with `entity.HasPageOrder(x => x.CreatedAt)`, so a caller who can see a few todos in a large table still costs about a page. `page.NextCursor` is the cursor for the next page. The database handles authorization and pagination together.
+`ToPageAsync` reads the query in its order and checks rows with the SQL Server function that walks resource ancestors and matches grants. The todo entity indexes that order, `entity.HasIndex(x => new { x.CreatedAt, x.Id })`, and SqlOS keeps a copy of every index under every node of the resource tree, so a caller who can see a few todos in a large table still costs about a page. `page.NextCursor` is the cursor for the next page. The database handles authorization and pagination together.
 
 The page is the whole list API. SqlOS has no counterpart to a ListObjects call that returns every object a user can access, and no authorized count: both cost every row the caller can see. A single object is a point check with `CheckAccessAsync`.
 

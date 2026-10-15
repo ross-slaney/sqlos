@@ -14,7 +14,7 @@ A list endpoint reads authorized data one page at a time: `ToPageAsync` on your 
 
 ## Pages
 
-Declare the order the list is paged by once, in the model:
+Index the columns the list sorts by, as you would for any database:
 
 ```csharp
 protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
@@ -23,7 +23,7 @@ protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
     {
         entity.HasKey(c => c.Id);
         entity.Property(c => c.Name).HasMaxLength(200);
-        entity.HasPageOrder(c => c.Name);   // (Name, Id)
+        entity.HasIndex(c => new { c.Name, c.Id });   // the order the list pages by
     });
 }
 ```
@@ -40,16 +40,16 @@ var page = await db.Chains
 return Results.Ok(page.ToResponse(c => new ChainDto(c.Id, c.Name)));
 ```
 
-`ToPageAsync` resolves the subject's principals (the subject plus its active groups) and the permission, then reads your query in its order and checks each row, for about a page of rows. When few of them are visible, it reads the declared order under each node the caller is granted instead (SqlOS keeps a copy of the order under every node of the resource tree, in its own tables), so a caller who can see 3 rows of a million costs about a page, not the table. The page's rows are then loaded through your query (`Include`, tracking) and checked once more.
+`ToPageAsync` resolves the subject's principals (the subject plus its active groups) and the permission, then reads your query in its order and checks each row, for about a page of rows. When few of them are visible, it reads the order under each node the caller is granted instead (SqlOS keeps a copy of every index of a protected table under every node of the resource tree, in tables of its own), so a caller who can see 3 rows of a million costs about a page, not the table. The page's rows are then loaded through your query (`Include`, tracking) and checked once more.
 
-The query must start from a `DbSet` of a context that derives from `SqlOSDbContext<TContext>`. The declaration adds a table to your EF model (`SqlOSFgaPage_Chains_Name`), so your next migration creates it. `SqlOSDbContext` keeps it current in the same transaction as every save, and fills it on the first start after you declare the order. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists) for the cursor, the response, and what the query may contain.
+The query must start from a `DbSet` of a context that derives from `SqlOSDbContext<TContext>`. Each index adds a table to your EF model (`SqlOSFgaPage_Chains_Name`, and `SqlOSFgaPage_Chains_Id` for the key), so your next migration creates it. `SqlOSDbContext` keeps it current in the same transaction as every save, and fills it on the first start after you add the index. See [Paginating authorized lists](/docs/guides/paginating-authorized-lists) for the cursor, the response, and what the query may contain.
 
 Pass `NextCursor` back as the next request's cursor. Do not write your own position filter (`.Where(c => c.Name.CompareTo(lastSeen) > 0)`, keyset libraries, `since=` parameters): `ToPageAsync` seeks under each of the caller's nodes from the cursor, and a hand-written position is just another filter there, so every page walks the caller's rows from the start of the order.
 
 ### What pages cost
 
 - **About a page** for callers who see little of a large table, for callers with many grants, for rows that sit at the far end of the order, and for application filters that pass few rows.
-- **An order that is not declared** still returns the right pages, but reads the table for a caller who sees little of it. `ToPageAsync` logs a warning naming the declaration to add.
+- **An order no index covers** still returns the right pages, but reads the table in that order for every caller, as in any database. `ToPageAsync` logs a warning naming the index to add.
 - **One case stays proportional to the caller's rows:** an application filter that few rows pass combined with a caller whose rows barely overlap it. SqlOS reads the caller's entries until a page passes your filter.
 
 ## No counts or joins

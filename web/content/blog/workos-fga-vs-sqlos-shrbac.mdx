@@ -128,7 +128,7 @@ var page = await dbContext.Projects
     .ToPageAsync(subjectId, "PROJECT_VIEW", pageSize: 25, cursor, cancellationToken);
 ```
 
-The query stays your EF query. Product filtering, sorting, the authorization check, and pagination all run in SQL Server, and `page.NextCursor` continues the list. Declare the order with `entity.HasPageOrder(x => x.Name)` and a caller who can see a few projects in a large table still costs about a page.
+The query stays your EF query. Product filtering, sorting, the authorization check, and pagination all run in SQL Server, and `page.NextCursor` continues the list. Index the order, `entity.HasIndex(x => new { x.Name, x.Id })`, and a caller who can see a few projects in a large table still costs about a page: SqlOS keeps a copy of every index under every node of the resource tree.
 
 That page is the whole list API. SqlOS has no discovery-style unpaged list of what a caller can access and no authorized count, because both cost every row the caller can see. A single project is a point check with `CheckAccessAsync`.
 

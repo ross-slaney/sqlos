@@ -1,12 +1,12 @@
 using Microsoft.EntityFrameworkCore;
-using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 using SqlOS.IntegrationTests.Infrastructure;
 
 namespace SqlOS.IntegrationTests.Fga.Infrastructure;
 
 /// <summary>
-/// A <c>SqlOSDbContext</c> over the shared test database with page-ordered application tables.
+/// A <c>SqlOSDbContext</c> over the shared test database with protected application tables. Every
+/// index is a page order, and so is the key; <c>PagedDocument.CreatedAt</c> has no index.
 /// </summary>
 public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbContext>
 {
@@ -15,6 +15,12 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
     public const string CounterEntries = "SqlOSFgaPage_PagedCounters_Rank";
     public const string WorkItemEntries = "SqlOSFgaPage_PagedWorkItems_Rank";
     public const string ScoreEntries = "SqlOSFgaPage_PagedScores_Score";
+
+    // The key order every protected entity gets.
+    public const string DocumentKeyEntries = "SqlOSFgaPage_PagedDocuments_Id";
+    public const string CounterKeyEntries = "SqlOSFgaPage_PagedCounters_Id";
+    public const string WorkItemKeyEntries = "SqlOSFgaPage_PagedWorkItems_Id";
+    public const string ScoreKeyEntries = "SqlOSFgaPage_PagedScores_Id";
 
     public PageOrderTestDbContext(DbContextOptions<PageOrderTestDbContext> options)
         : base(options)
@@ -51,8 +57,9 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
             entity.Ignore(document => document.ParentResourceId);
             entity.Ignore(document => document.ResourceDescription);
             entity.Ignore(document => document.ResourceIsActive);
-            entity.HasPageOrder(document => document.Rank);
-            entity.HasPageOrder(document => document.Title);
+            // The orders the lists page by. CategoryId's foreign-key index is a lookup and gets no order; CreatedAt has no index.
+            entity.HasIndex(document => new { document.Rank, document.Id });
+            entity.HasIndex(document => new { document.Title, document.Id });
         });
 
         modelBuilder.Entity<PagedCounter>(entity =>
@@ -61,7 +68,7 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
             entity.HasKey(counter => counter.Id);
             entity.Property(counter => counter.ResourceId).HasMaxLength(450);
             entity.HasIndex(counter => counter.ResourceId);
-            entity.HasPageOrder(counter => counter.Rank);
+            entity.HasIndex(counter => new { counter.Rank, counter.Id });
         });
 
         modelBuilder.Entity<PagedWorkItem>(entity =>
@@ -72,7 +79,6 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
             entity.Property(item => item.FolderResourceId).HasMaxLength(450);
             entity.HasIndex(item => item.ResourceId);
             entity.HasIndex(item => new { item.Rank, item.Id });
-            entity.HasPageOrder(item => item.Rank);
         });
 
         modelBuilder.Entity<PagedScore>(entity =>
@@ -83,7 +89,7 @@ public sealed class PageOrderTestDbContext : SqlOSDbContext<PageOrderTestDbConte
             entity.HasIndex(score => score.ResourceId);
             entity.Property(score => score.Score)
                 .HasComputedColumnSql(TestDatabase.IsPostgreSql ? "\"Points\" * 10" : "[Points] * 10", stored: true);
-            entity.HasPageOrder(score => score.Score);
+            entity.HasIndex(score => new { score.Score, score.Id });
         });
     }
 }

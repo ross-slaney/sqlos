@@ -15,13 +15,14 @@ using SqlOS.IntegrationTests.Infrastructure;
 namespace SqlOS.IntegrationTests.Fga;
 
 /// <summary>
-/// A declared order whose entry table does not exist yet (its migration has not been applied):
-/// startup logs it, saves still succeed, and pages return the right rows by reading the table.
+/// An order whose entry table does not exist yet (its migration has not been applied): startup
+/// logs it, saves still succeed, and pages return the right rows by reading the table.
 /// </summary>
 [TestClass]
 public class SqlOSFgaPageOrderMissingTableIntegrationTests
 {
     private const string EntryTable = "SqlOSFgaPage_PagedNotes_Rank";
+    private const string KeyEntryTable = "SqlOSFgaPage_PagedNotes_Id";
 
     [TestInitialize]
     public async Task CreateApplicationTableOnly()
@@ -30,9 +31,12 @@ public class SqlOSFgaPageOrderMissingTableIntegrationTests
         await PageOrderFixture.ExecuteAsync(TestDatabase.IsPostgreSql
             ? """CREATE TABLE IF NOT EXISTS "PagedNotes" ("Id" uuid NOT NULL PRIMARY KEY, "ResourceId" varchar(450) NOT NULL, "Rank" integer NOT NULL)"""
             : "IF OBJECT_ID(N'[dbo].[PagedNotes]', N'U') IS NULL CREATE TABLE [dbo].[PagedNotes] ([Id] uniqueidentifier NOT NULL PRIMARY KEY, [ResourceId] nvarchar(450) NOT NULL, [Rank] int NOT NULL)");
-        await PageOrderFixture.ExecuteAsync(TestDatabase.IsPostgreSql
-            ? $"DROP TABLE IF EXISTS {TestDatabase.Qualify(EntryTable)}"
-            : $"IF OBJECT_ID(N'[dbo].[{EntryTable}]', N'U') IS NOT NULL DROP TABLE {TestDatabase.Qualify(EntryTable)}");
+        foreach (var table in new[] { EntryTable, KeyEntryTable })
+        {
+            await PageOrderFixture.ExecuteAsync(TestDatabase.IsPostgreSql
+                ? $"DROP TABLE IF EXISTS {TestDatabase.Qualify(table)}"
+                : $"IF OBJECT_ID(N'[dbo].[{table}]', N'U') IS NOT NULL DROP TABLE {TestDatabase.Qualify(table)}");
+        }
     }
 
     [TestMethod]
@@ -43,9 +47,10 @@ public class SqlOSFgaPageOrderMissingTableIntegrationTests
 
         await SqlOSFgaPageOrderMaintenance.ReconcileAsync(context, logs.CreateLogger("startup"), CancellationToken.None);
 
-        logs.Entries.Where(entry => entry.Level == LogLevel.Warning)
-            .Should().ContainSingle()
-            .Which.Message.Should().StartWith($"Page order PagedNote(Rank, Id): table {EntryTable} does not exist.");
+        logs.Entries.Where(entry => entry.Level == LogLevel.Warning).Select(entry => entry.Message)
+            .Should().HaveCount(2)
+            .And.Contain(message => message.StartsWith($"Page order PagedNote(Id): table {KeyEntryTable} does not exist.", StringComparison.Ordinal))
+            .And.Contain(message => message.StartsWith($"Page order PagedNote(Rank, Id): table {EntryTable} does not exist.", StringComparison.Ordinal));
 
         var notes = Enumerable.Range(0, 12)
             .Select(rank => new PagedNote
@@ -102,7 +107,7 @@ public class SqlOSFgaPageOrderMissingTableIntegrationTests
                 entity.ToTable("PagedNotes");
                 entity.HasKey(note => note.Id);
                 entity.Property(note => note.ResourceId).HasMaxLength(450);
-                entity.HasPageOrder(note => note.Rank);
+                entity.HasIndex(note => note.Rank);
             });
     }
 

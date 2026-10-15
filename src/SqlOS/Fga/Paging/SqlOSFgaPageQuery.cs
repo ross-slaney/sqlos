@@ -33,7 +33,7 @@ internal static class SqlOSFgaPageQuery
     /// <param name="read1">Reads <c>b</c> rows of the application's query from the cursor.</param>
     /// <param name="read2">
     /// Reads up to <c>b</c> entries per node from the cursor, at most <c>P</c> merged;
-    /// <see langword="null"/> when the order is not declared.
+    /// <see langword="null"/> when no index covers the order.
     /// </param>
     /// <param name="cancellationToken">A token that cancels the reads.</param>
     public static async Task<Selection> SelectAsync(

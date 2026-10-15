@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using SqlOS.Fga.Extensions;
 using SqlOS.Fga.Interfaces;
 
 namespace SqlOS.Tests.Fga;
@@ -46,6 +45,52 @@ public sealed class PagedDetails : IHasResourceId
 {
     public string ResourceId { get; set; } = string.Empty;
     public int Rank { get; set; }
+}
+
+/// <summary>A protected entity whose sort index comes from an attribute and whose foreign key gets its index by convention.</summary>
+[Index(nameof(Rank))]
+public sealed class PagedIndexedProduct : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public int Rank { get; set; }
+    public Guid LocationId { get; set; }
+    public PagedLocation? Location { get; set; }
+}
+
+/// <summary>A protected entity with columns no order can use.</summary>
+public sealed class PagedOddRow : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public int NodeId { get; set; }
+    public byte[] Blob { get; set; } = [];
+}
+
+/// <summary>A protected entity with a string key that has no maximum length, as the examples have.</summary>
+public sealed class PagedStringKeyRow : IHasResourceId
+{
+    public string Id { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>A protected entity split from the products table.</summary>
+public sealed class PagedProductSummary : IHasResourceId
+{
+    public Guid Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+}
+
+/// <summary>The root of a hierarchy that only its derived type protects.</summary>
+public class PagedEntry
+{
+    public Guid Id { get; set; }
+}
+
+public sealed class PagedProtectedEntry : PagedEntry, IHasResourceId
+{
+    public string ResourceId { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -98,15 +143,15 @@ internal sealed class PageOrderModelContext : SqlOSDbContext<PageOrderModelConte
         }
     }
 
-    /// <summary>The products model most tests use, with its page orders.</summary>
+    /// <summary>The products model most tests use, with the indexes the test adds.</summary>
     public static PageOrderModelContext CreateProducts(
-        Action<EntityTypeBuilder<PagedProduct>> pageOrders,
+        Action<EntityTypeBuilder<PagedProduct>> indexes,
         bool postgreSql = false,
         [CallerMemberName] string scenario = "")
         => Create(modelBuilder => modelBuilder.Entity<PagedProduct>(entity =>
         {
             ConfigureProduct(entity);
-            pageOrders(entity);
+            indexes(entity);
         }), postgreSql, scenario);
 
     public static void ConfigureProduct(EntityTypeBuilder<PagedProduct> entity)
@@ -120,6 +165,20 @@ internal sealed class PageOrderModelContext : SqlOSDbContext<PageOrderModelConte
         entity.HasIndex(product => product.ResourceId).IsUnique();
         entity.HasOne(product => product.Location).WithMany().HasForeignKey(product => product.LocationId);
         entity.Ignore(product => product.Details);
+    }
+
+    public static void ConfigureIndexedProduct(EntityTypeBuilder<PagedIndexedProduct> entity)
+    {
+        entity.ToTable("IndexedProducts");
+        entity.HasKey(product => product.Id);
+        entity.Property(product => product.ResourceId).HasMaxLength(450);
+    }
+
+    public static void ConfigureOddRow(EntityTypeBuilder<PagedOddRow> entity)
+    {
+        entity.ToTable("OddRows");
+        entity.HasKey(row => row.Id);
+        entity.Property(row => row.ResourceId).HasMaxLength(450);
     }
 
     protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)

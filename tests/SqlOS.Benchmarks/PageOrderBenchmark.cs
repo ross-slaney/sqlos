@@ -26,7 +26,8 @@ namespace SqlOS.Benchmarks;
 /// <summary>
 /// Page orders at scale, on SQL Server or PostgreSQL: <c>ToPageAsync</c> against the removed
 /// <c>.Where(filter).OrderBy(Price).Take(20)</c> path over a retail tree
-/// (root → 5 divisions → 50 chains → 500 regions → 10,000 stores → products, one resource per product).
+/// (root → 5 divisions → 50 chains → 500 regions → 10,000 stores → products, one resource per product),
+/// then the storage of every page-order table and the cost of writes.
 /// </summary>
 /// <remarks>
 /// <code>
@@ -35,13 +36,17 @@ namespace SqlOS.Benchmarks;
 ///     [--products 1000000] [--runs 15] [--budget-seconds 60]
 /// </code>
 /// The database named in the connection string is dropped and recreated. "Rows read" is the rows of
-/// Products and of its entry table that the engine read, from the actual plans of every statement
-/// the page ran (SET STATISTICS XML / EXPLAIN ANALYZE).
+/// Products and of its page-order tables that the engine read, from the actual plans of every
+/// statement the page ran (SET STATISTICS XML / EXPLAIN ANALYZE). Products has indexes on
+/// <c>(Price, Id)</c> and <c>(StoreId, Price, Id)</c>, so it has three page orders: those two and the key.
 /// </remarks>
 internal static class PageOrderBenchmark
 {
     private const string Permission = "product.view";
-    private const string EntryTable = "SqlOSFgaPage_Products_Price";
+    private const string PriceTable = "SqlOSFgaPage_Products_Price";
+    private const string StorePriceTable = "SqlOSFgaPage_Products_StoreId_Price";
+    private const string KeyTable = "SqlOSFgaPage_Products_Id";
+    private static readonly string[] EntryTables = [PriceTable, StorePriceTable, KeyTable];
     private const int PageSize = 20;
     private const int Divisions = 5;
     private const int ChainsPerDivision = 10;
@@ -63,7 +68,8 @@ internal static class PageOrderBenchmark
 
         var productsPerStore = Math.Max(1, options.Products / Stores);
         var products = productsPerStore * Stores;
-        var bench = new Bench(options.PostgreSql, options.ConnectionString);
+        var bench = new Bench(options.PostgreSql, options.ConnectionString, productsPerStore);
+        var engine = options.PostgreSql ? "PostgreSQL" : "SQL Server";
 
         Console.WriteLine($"=== SqlOS page orders: {(options.PostgreSql ? "PostgreSQL" : "SQL Server")}, {products:N0} products ===");
         var setup = Stopwatch.StartNew();
@@ -80,8 +86,8 @@ internal static class PageOrderBenchmark
         Console.WriteLine($"  subjects and grants: {step.Elapsed.TotalSeconds:F1}s");
 
         step.Restart();
-        var entries = await bench.RebuildAsync();
-        Console.WriteLine($"  RebuildPageOrdersAsync: {entries:N0} entries in {step.Elapsed.TotalSeconds:F1}s");
+        var storage = await bench.RebuildAsync();
+        Console.WriteLine($"  RebuildPageOrdersAsync: {string.Join(", ", storage.Select(table => $"{table.Entries:N0} entries in {table.Table}"))} in {step.Elapsed.TotalSeconds:F1}s");
 
         await bench.AnalyzeAsync();
         Console.WriteLine($"  setup total: {setup.Elapsed.TotalMinutes:F1} min");
@@ -97,12 +103,29 @@ internal static class PageOrderBenchmark
         }
 
         Console.WriteLine();
-        Console.WriteLine($"| {(options.PostgreSql ? "PostgreSQL" : "SQL Server")}, {products:N0} products | Visible rows | `ToPageAsync` ms | rows read | removed `.Where(filter).OrderBy(Price).Take(20)` ms | rows read |");
+        Console.WriteLine($"| {engine}, {products:N0} products | Visible rows | `ToPageAsync` ms | rows read | removed `.Where(filter).OrderBy(Price).Take(20)` ms | rows read |");
         Console.WriteLine("| --- | ---: | ---: | ---: | ---: | ---: |");
         foreach (var result in results)
         {
             Console.WriteLine(
                 $"| {result.Scenario.Name} | {result.Visible:N0} | {result.Page.MedianMs:F1} | {result.Page.RowsRead:N0} | {result.Plain.MedianMs:F1} | {result.Plain.RowsRead:N0} |");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"| {engine}, storage | Entries | Size |");
+        Console.WriteLine("| --- | ---: | ---: |");
+        foreach (var table in storage)
+        {
+            Console.WriteLine($"| `{table.Table}` | {table.Entries:N0} | {table.Megabytes:N0} MB |");
+        }
+
+        Console.WriteLine();
+        var writes = await bench.MeasureWritesAsync();
+        Console.WriteLine($"| {engine}, writes (median ms) | no protected entity | three page orders |");
+        Console.WriteLine("| --- | ---: | ---: |");
+        foreach (var write in writes)
+        {
+            Console.WriteLine($"| {write.Name} | {write.BaselineMs:F1} | {write.IndexedMs:F1} |");
         }
     }
 
@@ -123,13 +146,25 @@ internal static class PageOrderBenchmark
 
     private sealed record Result(Scenario Scenario, long Visible, Measurement Page, Measurement Plain);
 
+    private sealed record Storage(string Table, long Entries, double Megabytes);
+
+    private sealed record Write(string Name, double BaselineMs, double IndexedMs);
+
     private sealed record Callers(string Admin, string Region, string Store, string HundredStores, string TenThousandProducts, string FarEnd);
 
-    private sealed class Bench(bool postgreSql, string connectionString)
+    private sealed class Bench(bool postgreSql, string connectionString, int productsPerStore)
     {
+        private int _nextProduct = Stores * productsPerStore + 1;
+
         public BenchDbContext CreateContext(params IInterceptor[] interceptors)
+            => new(Configure(new DbContextOptionsBuilder<BenchDbContext>(), interceptors).Options);
+
+        private BaselineBenchDbContext CreateBaselineContext()
+            => new(Configure(new DbContextOptionsBuilder<BaselineBenchDbContext>(), []).Options);
+
+        private DbContextOptionsBuilder<T> Configure<T>(DbContextOptionsBuilder<T> builder, IInterceptor[] interceptors)
+            where T : DbContext
         {
-            var builder = new DbContextOptionsBuilder<BenchDbContext>();
             if (postgreSql)
             {
                 builder.UseNpgsql(connectionString, npgsql => npgsql.CommandTimeout(3600));
@@ -144,7 +179,7 @@ internal static class PageOrderBenchmark
                 builder.AddInterceptors(interceptors);
             }
 
-            return new BenchDbContext(builder.Options);
+            return builder;
         }
 
         public async Task RecreateDatabaseAsync()
@@ -184,8 +219,8 @@ internal static class PageOrderBenchmark
             await new SqlOSFgaSchemaInitializer(context, fga, NullLogger<SqlOSFgaSchemaInitializer>.Instance).EnsureSchemaAsync();
             await new SqlOSFgaFunctionInitializer(context, fga, NullLogger<SqlOSFgaFunctionInitializer>.Instance).EnsureFunctionsExistAsync();
 
-            // The application's tables and the entry table of the declared order, as a migration would
-            // create them before the application starts and seeds.
+            // The application's tables and the three page-order tables, as a migration would create them
+            // before the application starts and seeds.
             await context.GetService<IRelationalDatabaseCreator>().CreateTablesAsync();
             await new SqlOSFgaSeedService(context, fga, NullLogger<SqlOSFgaSeedService>.Instance).SeedCoreAsync();
 
@@ -289,11 +324,142 @@ internal static class PageOrderBenchmark
             return callers;
         }
 
-        public async Task<long> RebuildAsync()
+        public async Task<IReadOnlyList<Storage>> RebuildAsync()
         {
             await using var context = CreateContext();
             await AuthService(context).RebuildPageOrdersAsync();
-            return await context.Set<Dictionary<string, object>>(EntryTable).LongCountAsync();
+            var storage = new List<Storage>();
+            foreach (var table in EntryTables)
+            {
+                var entries = await context.Set<Dictionary<string, object>>(table).LongCountAsync();
+                var megabytes = (await context.Database.SqlQueryRaw<long>(postgreSql
+                        ? $"SELECT pg_total_relation_size('dbo.\"{table}\"') AS \"Value\""
+                        : $"SELECT CAST(SUM(a.total_pages) * 8 * 1024 AS bigint) AS [Value] FROM sys.partitions p JOIN sys.allocation_units a ON a.container_id = p.partition_id WHERE p.object_id = OBJECT_ID(N'dbo.{table}')")
+                    .ToListAsync()).Single() / 1024.0 / 1024.0;
+                storage.Add(new Storage(table, entries, megabytes));
+            }
+
+            return storage;
+        }
+
+        /// <summary>
+        /// What a save costs with no protected entity (no page orders at all) and with Products' three
+        /// page orders: one product with its resource, a thousand in one save, and a region moved to
+        /// another chain, which rewrites the entries under it.
+        /// </summary>
+        public async Task<IReadOnlyList<Write>> MeasureWritesAsync()
+        {
+            var writes = new List<Write>();
+
+            writes.Add(new Write(
+                "Insert one product with its resource (median of 25 saves)",
+                await SingleInsertsAsync(() => CreateBaselineContext()),
+                await SingleInsertsAsync(() => CreateContext())));
+
+            writes.Add(new Write(
+                "Insert 1,000 products with their resources (one save)",
+                await BatchInsertAsync(() => CreateBaselineContext()),
+                await BatchInsertAsync(() => CreateContext())));
+
+            writes.Add(new Write(
+                $"Move a region ({StoresPerRegion * productsPerStore:N0} products) to another chain (one save)",
+                await MoveRegionAsync(() => CreateBaselineContext()),
+                await MoveRegionAsync(() => CreateContext())));
+
+            return writes;
+        }
+
+        private async Task<double> SingleInsertsAsync(Func<DbContext> create)
+        {
+            var times = new List<double>();
+            var added = new List<int>();
+            for (var run = 0; run < 26; run++)
+            {
+                await using var context = create();
+                var id = _nextProduct++;
+                AddProduct(context, id, $"store:{run * 97 + 1}");
+                var timer = Stopwatch.StartNew();
+                await context.SaveChangesAsync();
+                timer.Stop();
+                added.Add(id);
+                if (run > 0)
+                {
+                    times.Add(timer.Elapsed.TotalMilliseconds);
+                }
+            }
+
+            await RemoveProductsAsync(added);
+            return Median(times);
+        }
+
+        private async Task<double> BatchInsertAsync(Func<DbContext> create)
+        {
+            await using var context = create();
+            var added = Enumerable.Range(0, 1_000).Select(_ => _nextProduct++).ToList();
+            foreach (var (id, index) in added.Select((id, index) => (id, index)))
+            {
+                AddProduct(context, id, $"store:{index % 1_000 * 7 + 1}");
+            }
+
+            var timer = Stopwatch.StartNew();
+            await context.SaveChangesAsync();
+            var elapsed = timer.Elapsed.TotalMilliseconds;
+            await RemoveProductsAsync(added);
+            return elapsed;
+        }
+
+        private async Task<double> MoveRegionAsync(Func<DbContext> create)
+        {
+            const string region = "region:123";
+            double elapsed;
+            string originalParent;
+            await using (var context = create())
+            {
+                var resource = await context.Set<SqlOSFgaResource>().SingleAsync(candidate => candidate.Id == region);
+                originalParent = resource.ParentId!;
+                resource.ParentId = "chain:7";
+                var timer = Stopwatch.StartNew();
+                await context.SaveChangesAsync();
+                elapsed = timer.Elapsed.TotalMilliseconds;
+            }
+
+            // Back through the protected context, which rewrites every table, so the next measurement
+            // starts from entries equal to a rebuild.
+            await using var restore = CreateContext();
+            var moved = await restore.Set<SqlOSFgaResource>().SingleAsync(candidate => candidate.Id == region);
+            moved.ParentId = originalParent;
+            await restore.SaveChangesAsync();
+            return elapsed;
+        }
+
+        private static void AddProduct(DbContext context, int id, string store)
+        {
+            context.Set<SqlOSFgaResource>().Add(new SqlOSFgaResource
+            {
+                Id = $"product:{id}",
+                ParentId = store,
+                Name = $"Product {id}",
+                ResourceTypeId = "product"
+            });
+            var storeId = int.Parse(store["store:".Length..], CultureInfo.InvariantCulture);
+            if (context is BaselineBenchDbContext)
+            {
+                context.Add(new BaselineBenchProduct { Id = id, ResourceId = $"product:{id}", Name = $"Product {id}", Price = 1, StoreId = storeId });
+            }
+            else
+            {
+                context.Add(new BenchProduct { Id = id, ResourceId = $"product:{id}", Name = $"Product {id}", Price = 1, StoreId = storeId });
+            }
+        }
+
+        /// <summary>Deletes products and their resources through the protected context, which deletes every table's entries.</summary>
+        private async Task RemoveProductsAsync(IReadOnlyCollection<int> ids)
+        {
+            await using var context = CreateContext();
+            context.Products.RemoveRange(await context.Products.Where(product => ids.Contains(product.Id)).ToListAsync());
+            var resourceIds = ids.Select(id => $"product:{id}").ToList();
+            context.Set<SqlOSFgaResource>().RemoveRange(await context.Set<SqlOSFgaResource>().Where(resource => resourceIds.Contains(resource.Id)).ToListAsync());
+            await context.SaveChangesAsync();
         }
 
         public async Task AnalyzeAsync()
@@ -359,11 +525,15 @@ internal static class PageOrderBenchmark
                 times.Add(timer.Elapsed.TotalMilliseconds);
             }
 
+            return new Measurement(Median(times), times.Count, 0, 0);
+        }
+
+        private static double Median(List<double> times)
+        {
             times.Sort();
-            var median = times.Count % 2 == 1
+            return times.Count % 2 == 1
                 ? times[times.Count / 2]
                 : (times[times.Count / 2 - 1] + times[times.Count / 2]) / 2;
-            return new Measurement(median, times.Count, 0, 0);
         }
 
         /// <summary>
@@ -442,7 +612,7 @@ internal static class PageOrderBenchmark
         private static long SqlServerRows(XDocument plan)
         {
             XNamespace showplan = "http://schemas.microsoft.com/sqlserver/2004/07/showplan";
-            var tables = new[] { "[Products]", $"[{EntryTable}]" };
+            var tables = EntryTables.Select(table => $"[{table}]").Append("[Products]").ToArray();
             return plan.Descendants(showplan + "RelOp")
                 .Where(relOp => relOp.Elements()
                     .Any(@operator => @operator.Elements(showplan + "Object")
@@ -455,7 +625,8 @@ internal static class PageOrderBenchmark
         {
             var rows = 0L;
             if (node.TryGetProperty("Relation Name", out var relation)
-                && relation.GetString() is "Products" or EntryTable)
+                && relation.GetString() is { } name
+                && (name == "Products" || EntryTables.Contains(name)))
             {
                 // A scan's "Actual Rows" are the rows that passed its filter; the authorization check
                 // is often that filter, so the rows it removed were read too.
@@ -544,6 +715,7 @@ internal static class PageOrderBenchmark
     }
 }
 
+/// <summary>Products with its indexes: three page orders, (Price, Id), (StoreId, Price, Id) and the key.</summary>
 internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) : SqlOSDbContext<BenchDbContext>(options)
 {
     public DbSet<BenchProduct> Products => Set<BenchProduct>();
@@ -559,15 +731,38 @@ internal sealed class BenchDbContext(DbContextOptions<BenchDbContext> options) :
             entity.Property(product => product.Name).HasMaxLength(100);
             entity.Property(product => product.Price).HasPrecision(10, 2);
             entity.HasIndex(product => product.ResourceId).IsUnique();
-            // The application's own indexes for its order and for the store-scoped list.
+            // The application's own indexes for its order and for the store-scoped list; each is a page order.
             entity.HasIndex(product => new { product.Price, product.Id });
             entity.HasIndex(product => new { product.StoreId, product.Price, product.Id });
-            entity.HasPageOrder(product => product.Price);
         });
     }
 }
 
+/// <summary>Products as an entity that is not protected: saves write no page-order entries.</summary>
+internal sealed class BaselineBenchDbContext(DbContextOptions<BaselineBenchDbContext> options) : SqlOSDbContext<BaselineBenchDbContext>(options)
+{
+    protected override void OnApplicationModelCreating(ModelBuilder modelBuilder)
+        => modelBuilder.Entity<BaselineBenchProduct>(entity =>
+        {
+            entity.ToTable("Products");
+            entity.HasKey(product => product.Id);
+            entity.Property(product => product.Id).ValueGeneratedNever();
+            entity.Property(product => product.ResourceId).HasMaxLength(64);
+            entity.Property(product => product.Name).HasMaxLength(100);
+            entity.Property(product => product.Price).HasPrecision(10, 2);
+        });
+}
+
 internal sealed class BenchProduct : IHasResourceId
+{
+    public int Id { get; set; }
+    public string ResourceId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public decimal Price { get; set; }
+    public int StoreId { get; set; }
+}
+
+internal sealed class BaselineBenchProduct
 {
     public int Id { get; set; }
     public string ResourceId { get; set; } = string.Empty;

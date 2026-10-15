@@ -17,8 +17,8 @@ public static class InventoryEndpoints
     {
         var group = app.MapGroup("/api").WithTags("Inventory");
 
-        // Name, Sku and Price are declared page orders (ExampleAppDbContext). ToPageAsync checks each
-        // row against the caller's grants, applies the cursor, and appends the Id tiebreaker.
+        // Inventory is indexed by (Name, Id), (Sku, Id) and (Price, Id) (ExampleAppDbContext). ToPageAsync
+        // checks each row against the caller's grants, applies the cursor, and appends the Id tiebreaker.
         group.MapGet("/locations/{locationId}/inventory", async (
             string locationId,
             ExampleAppDbContext context,

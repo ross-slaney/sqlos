@@ -248,6 +248,36 @@ public sealed class SqlOSExampleRetailFgaIntegrationTests
     }
 
     [TestMethod]
+    [DataRow("name")]
+    [DataRow("sku")]
+    [DataRow("price")]
+    public async Task InventoryList_PagesByEachIndexedOrder_ThroughNextCursor(string sortBy)
+    {
+        // Name, Sku and Price are each indexed with the key (ExampleAppDbContext), so each is a page order.
+        var companyAdminEmail = await GetUserEmailByDisplayNameAsync("Company Admin");
+        var whole = await GetAsUserAsync($"/api/locations/loc_001/inventory?pageSize=100&sortBy={sortBy}", companyAdminEmail);
+        whole.EnsureSuccessStatusCode();
+        var expected = JsonDocument.Parse(await whole.Content.ReadAsStringAsync()).RootElement.GetProperty("data")
+            .EnumerateArray().Select(item => item.GetProperty("id").GetString()!).ToList();
+
+        var paged = new List<string>();
+        string? cursor = null;
+        do
+        {
+            var path = $"/api/locations/loc_001/inventory?pageSize=1&sortBy={sortBy}" + (cursor == null ? string.Empty : $"&cursor={Uri.EscapeDataString(cursor)}");
+            var response = await GetAsUserAsync(path, companyAdminEmail);
+            response.EnsureSuccessStatusCode();
+            var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            paged.AddRange(json.RootElement.GetProperty("data").EnumerateArray().Select(item => item.GetProperty("id").GetString()!));
+            cursor = json.RootElement.GetProperty("nextCursor").GetString();
+        }
+        while (cursor != null);
+
+        expected.Should().HaveCountGreaterThan(1);
+        paged.Should().Equal(expected);
+    }
+
+    [TestMethod]
     public async Task InventoryCursor_FromAnotherSort_IsABadRequest()
     {
         var companyAdminEmail = await GetUserEmailByDisplayNameAsync("Company Admin");

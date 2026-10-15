@@ -29,7 +29,8 @@ public class SqlOSFgaPageOrderIntegrationTests
             await using var context = PageOrderFixture.CreateContext();
             var documents = await context.Documents.AsNoTracking().ToListAsync();
             var allowed = await PageOrderFixture.AllowedResourcesAsync(caller, documents.Select(document => document.ResourceId));
-            foreach (var order in new[] { "Rank", "Title" })
+            // Rank and Title come from indexes; Id is the key order every protected entity gets.
+            foreach (var order in new[] { "Rank", "Title", "Id" })
             {
                 foreach (var descending in new[] { false, true })
                 {
@@ -281,7 +282,7 @@ public class SqlOSFgaPageOrderIntegrationTests
     }
 
     [TestMethod]
-    public async Task UndeclaredOrder_ReturnsTheRightPages_AndWarnsOnce()
+    public async Task OrderWithNoIndex_ReturnsTheRightPages_AndWarnsOnce()
     {
         var logs = new CapturingLoggerFactory();
         await using var context = PageOrderFixture.CreateContext(logs);
@@ -291,13 +292,40 @@ public class SqlOSFgaPageOrderIntegrationTests
         var firstWalk = await PageOrderFixture.WalkAsync(ordered, PageOrderFixture.DirectSubjectId, 2);
         var secondWalk = await PageOrderFixture.WalkAsync(ordered, PageOrderFixture.DirectSubjectId, 2);
 
-        AssertPages(firstWalk, expected, 2, "undeclared CreatedAt");
-        AssertPages(secondWalk, expected, 2, "undeclared CreatedAt, again");
+        AssertPages(firstWalk, expected, 2, "CreatedAt, no index");
+        AssertPages(secondWalk, expected, 2, "CreatedAt, no index, again");
+        logs.Commands.Should().NotContain(command => command.Contains("fn_PageNodes", StringComparison.Ordinal));
         logs.Entries.Where(entry => entry.Level == LogLevel.Warning && entry.Category == "SqlOS.Fga")
             .Should().ContainSingle()
             .Which.Message.Should().StartWith("ToPageAsync scanned ")
             .And.Contain("of PagedDocument ordered by CreatedAt, Id asc to fill a page of 2")
-            .And.Contain("Declare modelBuilder.Entity<PagedDocument>().HasPageOrder(e => e.CreatedAt) and add a migration.");
+            .And.Contain("No index of PagedDocuments covers that order, so every caller's page reads the table in it.")
+            .And.Contain("Add modelBuilder.Entity<PagedDocument>().HasIndex(e => e.CreatedAt) and a migration; SqlOS keeps a copy of every index under each node of the resource tree.");
+        logs.Entries.Where(entry => entry.Level == LogLevel.Debug && entry.Category == "SqlOS.Fga")
+            .Should().OnlyContain(entry => entry.Message.Contains("(page order no index)", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task OrderThatExtendsAnIndexedOne_HasNoIndex()
+    {
+        // Title is indexed alone; Title then Rank is another order, and no index covers it.
+        var logs = new CapturingLoggerFactory();
+        await using var context = PageOrderFixture.CreateContext(logs);
+        var ordered = context.Documents.AsNoTracking().OrderBy(document => document.Title).ThenBy(document => document.Rank);
+        var rows = await context.Documents.AsNoTracking().ToListAsync();
+        var allowed = await PageOrderFixture.AllowedResourcesAsync(PageOrderFixture.DirectSubjectId, rows.Select(row => row.ResourceId));
+        var expected = rows.Where(row => allowed.Contains(row.ResourceId))
+            .OrderBy(row => row.Title, StringComparer.Ordinal).ThenBy(row => row.Rank).ThenBy(row => row.Id, PageOrderFixture.KeyOrder)
+            .Select(row => row.Id)
+            .ToList();
+
+        var pages = await PageOrderFixture.WalkAsync(ordered, PageOrderFixture.DirectSubjectId, 2);
+
+        AssertPages(pages, expected, 2, "Title, Rank");
+        logs.Commands.Should().NotContain(command => command.Contains("fn_PageNodes", StringComparison.Ordinal));
+        logs.Entries.Where(entry => entry.Level == LogLevel.Warning && entry.Category == "SqlOS.Fga")
+            .Should().ContainSingle()
+            .Which.Message.Should().Contain("HasIndex(e => new { e.Title, e.Rank })");
     }
 
     [TestMethod]

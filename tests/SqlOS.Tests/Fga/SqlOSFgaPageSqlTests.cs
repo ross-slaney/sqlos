@@ -159,45 +159,94 @@ public class SqlOSFgaPageSqlTests
     }
 
     [TestMethod]
-    public void SubtreeStatements_WalkDescendantsOfTheChangedResources_BoundedByMaxDepth()
+    public void SubtreeStatements_WalkDescendantsOfTheMovedResources_BoundedByMaxDepth()
     {
-        var sqlServerDelete = SqlServerDatabaseProvider.Instance.BuildDeletePageEntriesBySubtreeSql(Order, "@resourceIds");
-        var sqlServerInsert = SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, "@resourceIds", exceptKeys: null);
-        var postgreSqlDelete = PostgreSqlDatabaseProvider.Instance.BuildDeletePageEntriesBySubtreeSql(Order, "@resourceIds");
-        var postgreSqlInsert = PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, "@resourceIds", exceptKeys: null);
+        var both = new SqlOSFgaChangedResources("@movedResources", "@addedOrDeletedResources");
+        var sqlServerDelete = SqlServerDatabaseProvider.Instance.BuildDeletePageEntriesBySubtreeSql(Order, both);
+        var sqlServerInsert = SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, both, exceptKeys: null);
+        var postgreSqlDelete = PostgreSqlDatabaseProvider.Instance.BuildDeletePageEntriesBySubtreeSql(Order, both);
+        var postgreSqlInsert = PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, both, exceptKeys: null);
 
         foreach (var sql in new[] { sqlServerDelete, sqlServerInsert })
         {
             sql.Should().StartWith("WITH subtree AS (")
-                .And.Contain("FROM OPENJSON(@resourceIds) AS r")
+                .And.Contain("FROM OPENJSON(@movedResources) AS r")
                 .And.Contain("FROM [dbo].[SqlOSFgaResources] AS child")
                 .And.Contain("INNER JOIN subtree ON child.ParentId = subtree.Id")
-                .And.Contain("WHERE subtree.Depth < 7");
+                .And.Contain("WHERE subtree.Depth < 7")
+                .And.NotContain("OPENJSON(@addedOrDeletedResources) AS r");
         }
 
         foreach (var sql in new[] { postgreSqlDelete, postgreSqlInsert })
         {
             sql.Should().StartWith("WITH RECURSIVE subtree AS (")
-                .And.Contain("FROM unnest(@resourceIds) AS ids(id)")
+                .And.Contain("FROM unnest(@movedResources) AS ids(id)")
                 .And.Contain("FROM \"dbo\".\"SqlOSFgaResources\" AS child")
                 .And.Contain("WHERE subtree.\"Depth\" < 7");
         }
 
-        sqlServerDelete.Should().Contain("DELETE FROM [dbo].[SqlOSFgaPage_Products_Price]")
-            .And.Contain("WHERE t.[ResourceId] IN (SELECT subtree.Id FROM subtree)");
-        sqlServerInsert.Should().Contain("CROSS APPLY [dbo].[fn_ResourceAncestors](t.[ResourceId]) AS a")
-            .And.EndWith("WHERE t.[ResourceId] IN (SELECT subtree.Id FROM subtree);");
-        postgreSqlInsert.Should().Contain("CROSS JOIN LATERAL \"dbo\".\"fn_ResourceAncestors\"(t.\"ResourceId\") AS a")
-            .And.EndWith("WHERE t.\"ResourceId\" IN (SELECT subtree.\"Id\" FROM subtree);");
+        const string sqlServerResources = "WHERE t.[ResourceId] IN (SELECT subtree.Id FROM subtree UNION ALL SELECT CAST(changed.[value] AS NVARCHAR(450)) FROM OPENJSON(@addedOrDeletedResources) AS changed)";
+        const string postgreSqlResources = "WHERE t.\"ResourceId\" IN (SELECT subtree.\"Id\" FROM subtree UNION ALL SELECT changed.id::varchar(450) FROM unnest(@addedOrDeletedResources) AS changed(id))";
+        sqlServerDelete.Should().Contain("DELETE FROM [dbo].[SqlOSFgaPage_Products_Price]").And.Contain(sqlServerResources);
+        sqlServerInsert.Should().Contain("CROSS APPLY [dbo].[fn_ResourceAncestors](t.[ResourceId]) AS a").And.EndWith($"{sqlServerResources};");
+        postgreSqlDelete.Should().Contain(postgreSqlResources);
+        postgreSqlInsert.Should().Contain("CROSS JOIN LATERAL \"dbo\".\"fn_ResourceAncestors\"(t.\"ResourceId\") AS a").And.EndWith($"{postgreSqlResources};");
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void SubtreeStatements_WithOnlyAddedOrDeletedResources_DoNotWalk(bool postgreSql)
+    {
+        // ParentId is a foreign key: a resource under an added or deleted one is added or deleted in the same save.
+        var resources = new SqlOSFgaChangedResources(null, "@addedOrDeletedResources");
+        var provider = Provider(postgreSql);
+
+        foreach (var sql in new[]
+                 {
+                     provider.BuildDeletePageEntriesBySubtreeSql(Order, resources),
+                     provider.BuildInsertPageEntriesBySubtreeSql(Order, resources, exceptKeys: null),
+                 })
+        {
+            sql.Should().NotContain("subtree").And.Contain("@addedOrDeletedResources");
+        }
+
+        provider.BuildDeletePageEntriesBySubtreeSql(Order, resources).Should().StartWith("DELETE FROM ");
+        provider.BuildInsertPageEntriesBySubtreeSql(Order, resources, exceptKeys: null).Should().StartWith("INSERT INTO ");
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public void SubtreeStatements_WithOnlyMovedResources_ReadTheWalk(bool postgreSql)
+    {
+        var resources = new SqlOSFgaChangedResources("@movedResources", null);
+        var sql = Provider(postgreSql).BuildDeletePageEntriesBySubtreeSql(Order, resources);
+
+        sql.Should().Contain(postgreSql ? "IN (SELECT subtree.\"Id\" FROM subtree)" : "IN (SELECT subtree.Id FROM subtree)")
+            .And.NotContain("UNION ALL SELECT");
     }
 
     [TestMethod]
     public void SubtreeInsert_SkipsTheRowsTheKeyInsertWrites()
     {
-        SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, "@resourceIds", "@keys0")
+        var moved = new SqlOSFgaChangedResources("@movedResources", null);
+        SqlServerDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, moved, "@keys0")
             .Should().EndWith("WHERE t.[ResourceId] IN (SELECT subtree.Id FROM subtree) AND t.[Id] NOT IN (SELECT CAST(k.[value] AS uniqueidentifier) FROM OPENJSON(@keys0) AS k);");
-        PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, "@resourceIds", "@keys0")
+        PostgreSqlDatabaseProvider.Instance.BuildInsertPageEntriesBySubtreeSql(Order, moved, "@keys0")
             .Should().EndWith("WHERE t.\"ResourceId\" IN (SELECT subtree.\"Id\" FROM subtree) AND t.\"Id\" <> ALL(@keys0);");
+    }
+
+    [TestMethod]
+    public void SaveStatements_RunWithoutJit_OnPostgreSql_AndRestoreItAfter()
+    {
+        var statements = Provider(postgreSql: false).BuildDeletePageEntriesByKeysSql(Order, "@keys0");
+
+        Provider(postgreSql: false).WrapPageMaintenanceSql(statements).Should().Be(statements);
+        var wrapped = Provider(postgreSql: true).WrapPageMaintenanceSql(statements);
+        wrapped.Should().StartWith("SELECT set_config('sqlos.jit', current_setting('jit'), true), set_config('jit', 'off', true);")
+            .And.Contain(statements)
+            .And.EndWith("SELECT set_config('jit', current_setting('sqlos.jit'), true);");
     }
 
     [TestMethod]

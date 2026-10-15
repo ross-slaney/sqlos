@@ -45,7 +45,7 @@ protected SqlOSDbContext(DbContextOptions<TContext> options)
 | --- | --- | --- |
 | `options` | `DbContextOptions<TContext>` | EF Core options registered for the derived application context. |
 
-The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model. Relational contexts also register the `dbo.fn_IsResourceAccessible` and `dbo.fn_PageNodes` table-valued functions. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings, then adds the entry table of every page order the application declared with `HasPageOrder`.
+The base context registers SqlOS auth, email, calendar, and FGA entities in the EF model. Relational contexts also register the `dbo.fn_IsResourceAccessible` and `dbo.fn_PageNodes` table-valued functions. Its sealed `OnModelCreating` implementation invokes `OnApplicationModelCreating` for application-owned mappings, then adds a page-order table for the primary key and for every index of each `IHasResourceId` entity.
 
 `SaveChanges` and `SaveChangesAsync` synchronize tracked entities that implement `ISqlOSResourceEntity` into the FGA resource table before EF saves the unit of work, and rewrite the page-order entries of the rows and resources the save changes in the same transaction (see [Paginating authorized lists](/docs/guides/paginating-authorized-lists#keeping-page-orders-current)).
 

@@ -166,7 +166,7 @@ public static class ExampleEndpoints
 
             await fgaService.EnsureUserAccessAsync(subjectId, organizationId, cancellationToken);
 
-            // Name is a declared page order (ExampleAppDbContext).
+            // Workspaces are indexed by (Name, Id) (ExampleAppDbContext), so this page costs about a page for any caller.
             SqlOSCursorPage<Workspace> page;
             try
             {
