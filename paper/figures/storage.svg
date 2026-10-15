@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="660" viewBox="0 0 1000 660" font-family="Helvetica, Arial, sans-serif">
+  <rect width="1000" height="660" fill="#ffffff"/>
+  <text x="40" y="40" font-size="24" font-weight="bold" fill="#111827">How the copies are stored</text>
+  <text x="40" y="62" font-size="14" fill="#374151">One entry per row per ancestor, sorted within each node.</text>
+
+  <!-- Tree -->
+  <text x="40" y="82" font-size="16" font-weight="bold" fill="#374151">The resource tree</text>
+  <g font-size="15" fill="#111827">
+    <!-- root -->
+    <rect x="150" y="100" width="110" height="34" rx="8" fill="#f3f4f6" stroke="#374151" stroke-width="1.5"/>
+    <text x="205" y="123" text-anchor="middle">root</text>
+    <!-- D1 -->
+    <rect x="150" y="160" width="110" height="34" rx="8" fill="#f3f4f6" stroke="#374151" stroke-width="1.5"/>
+    <text x="205" y="183" text-anchor="middle">division D1</text>
+    <!-- C1 -->
+    <rect x="150" y="220" width="110" height="34" rx="8" fill="#f3f4f6" stroke="#374151" stroke-width="1.5"/>
+    <text x="205" y="243" text-anchor="middle">chain C1</text>
+    <!-- R1 -->
+    <rect x="150" y="280" width="110" height="34" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="2"/>
+    <text x="205" y="303" text-anchor="middle">region R1</text>
+    <!-- S1, S2 -->
+    <rect x="70" y="350" width="100" height="34" rx="8" fill="#f3f4f6" stroke="#374151" stroke-width="1.5"/>
+    <text x="120" y="373" text-anchor="middle">store S1</text>
+    <rect x="240" y="350" width="100" height="34" rx="8" fill="#f3f4f6" stroke="#374151" stroke-width="1.5"/>
+    <text x="290" y="373" text-anchor="middle">store S2</text>
+    <!-- products -->
+    <rect x="40" y="420" width="70" height="30" rx="6" fill="#fff7ed" stroke="#9a3412" stroke-width="1.2"/>
+    <text x="75" y="440" text-anchor="middle" font-size="13">p1 $3</text>
+    <rect x="130" y="420" width="70" height="30" rx="6" fill="#fff7ed" stroke="#9a3412" stroke-width="1.2"/>
+    <text x="165" y="440" text-anchor="middle" font-size="13">p2 $9</text>
+    <rect x="215" y="420" width="70" height="30" rx="6" fill="#fff7ed" stroke="#9a3412" stroke-width="1.2"/>
+    <text x="250" y="440" text-anchor="middle" font-size="13">p3 $5</text>
+    <rect x="305" y="420" width="70" height="30" rx="6" fill="#fff7ed" stroke="#9a3412" stroke-width="1.2"/>
+    <text x="340" y="440" text-anchor="middle" font-size="13">p4 $7</text>
+  </g>
+  <g stroke="#6b7280" stroke-width="1.5" fill="none">
+    <line x1="205" y1="134" x2="205" y2="160"/>
+    <line x1="205" y1="194" x2="205" y2="220"/>
+    <line x1="205" y1="254" x2="205" y2="280"/>
+    <line x1="205" y1="314" x2="120" y2="350"/>
+    <line x1="205" y1="314" x2="290" y2="350"/>
+    <line x1="120" y1="384" x2="75" y2="420"/>
+    <line x1="120" y1="384" x2="165" y2="420"/>
+    <line x1="290" y1="384" x2="250" y2="420"/>
+    <line x1="290" y1="384" x2="340" y2="420"/>
+  </g>
+  <text x="40" y="482" font-size="13" fill="#6b7280">Each product's ResourceId names its store.</text>
+  <text x="40" y="500" font-size="13" fill="#6b7280">A grant on R1 (highlighted) reaches p1, p2, p3 and p4.</text>
+
+  <!-- Products table -->
+  <text x="470" y="82" font-size="16" font-weight="bold" fill="#374151">Products (the application's table, unchanged)</text>
+  <g font-size="14">
+    <rect x="470" y="92" width="300" height="26" fill="#e5e7eb" stroke="#9ca3af"/>
+    <text x="480" y="110" font-weight="bold">Id</text><text x="560" y="110" font-weight="bold">Price</text><text x="650" y="110" font-weight="bold">ResourceId</text>
+    <rect x="470" y="118" width="300" height="24" fill="#ffffff" stroke="#d1d5db"/>
+    <text x="480" y="135">p1</text><text x="560" y="135">3</text><text x="650" y="135">S1</text>
+    <rect x="470" y="142" width="300" height="24" fill="#f9fafb" stroke="#d1d5db"/>
+    <text x="480" y="159">p2</text><text x="560" y="159">9</text><text x="650" y="159">S1</text>
+    <rect x="470" y="166" width="300" height="24" fill="#ffffff" stroke="#d1d5db"/>
+    <text x="480" y="183">p3</text><text x="560" y="183">5</text><text x="650" y="183">S2</text>
+    <rect x="470" y="190" width="300" height="24" fill="#f9fafb" stroke="#d1d5db"/>
+    <text x="480" y="207">p4</text><text x="560" y="207">7</text><text x="650" y="207">S2</text>
+  </g>
+  <text x="470" y="236" font-size="13" fill="#6b7280">Only ResourceId comes from the library: no other columns, triggers or indexes.</text>
+
+  <!-- Copy table -->
+  <text x="470" y="276" font-size="16" font-weight="bold" fill="#374151">The copy: SqlOSFgaPage_Products_Price, in SqlOS's own schema</text>
+  <g font-size="14">
+    <rect x="470" y="286" width="300" height="26" fill="#e5e7eb" stroke="#9ca3af"/>
+    <text x="480" y="304" font-weight="bold">NodeId</text><text x="590" y="304" font-weight="bold">Price</text><text x="680" y="304" font-weight="bold">RowKey</text>
+    <!-- S1 -->
+    <rect x="470" y="312" width="300" height="24" fill="#ffffff" stroke="#d1d5db"/>
+    <text x="480" y="329">S1</text><text x="590" y="329">3</text><text x="680" y="329">p1</text>
+    <rect x="470" y="336" width="300" height="24" fill="#ffffff" stroke="#d1d5db"/>
+    <text x="480" y="353">S1</text><text x="590" y="353">9</text><text x="680" y="353">p2</text>
+    <!-- S2 -->
+    <rect x="470" y="360" width="300" height="24" fill="#f9fafb" stroke="#d1d5db"/>
+    <text x="480" y="377">S2</text><text x="590" y="377">5</text><text x="680" y="377">p3</text>
+    <rect x="470" y="384" width="300" height="24" fill="#f9fafb" stroke="#d1d5db"/>
+    <text x="480" y="401">S2</text><text x="590" y="401">7</text><text x="680" y="401">p4</text>
+    <!-- R1 highlighted -->
+    <rect x="470" y="408" width="300" height="24" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="480" y="425">R1</text><text x="590" y="425">3</text><text x="680" y="425">p1</text>
+    <rect x="470" y="432" width="300" height="24" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="480" y="449">R1</text><text x="590" y="449">5</text><text x="680" y="449">p3</text>
+    <rect x="470" y="456" width="300" height="24" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="480" y="473">R1</text><text x="590" y="473">7</text><text x="680" y="473">p4</text>
+    <rect x="470" y="480" width="300" height="24" fill="#dbeafe" stroke="#93c5fd"/>
+    <text x="480" y="497">R1</text><text x="590" y="497">9</text><text x="680" y="497">p2</text>
+    <!-- upper levels -->
+    <rect x="470" y="504" width="300" height="24" fill="#ffffff" stroke="#d1d5db"/>
+    <text x="480" y="521" fill="#6b7280" font-style="italic">C1, D1, root: the same four entries each</text>
+  </g>
+  <!-- callout for R1 range -->
+  <path d="M 775 420 L 800 420 L 800 490 L 775 490" fill="none" stroke="#1d4ed8" stroke-width="2"/>
+  <text x="810" y="446" font-size="14" fill="#1d4ed8" font-weight="bold">R1's rows, already</text>
+  <text x="810" y="464" font-size="14" fill="#1d4ed8" font-weight="bold">in price order</text>
+  <text x="810" y="484" font-size="13" fill="#374151">one index seek finds them</text>
+
+  <rect x="470" y="548" width="490" height="92" rx="6" fill="#f3f4f6" stroke="#d1d5db"/>
+  <text x="486" y="572" font-size="14" font-weight="bold" fill="#111827">The entry rule</text>
+  <text x="486" y="592" font-size="13" fill="#374151">(X, r) is an entry exactly when X is r's own resource or an active ancestor of it.</text>
+  <text x="486" y="610" font-size="13" fill="#374151">Primary key (NodeId, Price, RowKey). Five entries per product here;</text>
+  <text x="486" y="628" font-size="13" fill="#374151">six in the benchmark, where each product is its own resource.</text>
+</svg>

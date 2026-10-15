@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="660" viewBox="0 0 1000 660" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="660" fill="#ffffff"/>
+  <text x="40" y="40" font-size="24" font-weight="bold" fill="#111827">How writes keep the copies current, in the write's own transaction</text>
+
+  <!-- Left: insert -->
+  <rect x="40" y="70" width="450" height="400" rx="8" fill="#ffffff" stroke="#374151" stroke-width="1.5"/>
+  <text x="56" y="98" font-size="17" font-weight="bold" fill="#111827">Insert a product p9 (price 6) under store S2</text>
+  <rect x="56" y="114" width="418" height="300" rx="6" fill="#f9fafb" stroke="#9ca3af" stroke-dasharray="6 4"/>
+  <text x="70" y="136" font-size="13" font-weight="bold" fill="#6b7280">one transaction</text>
+
+  <rect x="70" y="148" width="390" height="40" rx="6" fill="#ffffff" stroke="#9ca3af"/>
+  <text x="82" y="166" font-size="13" fill="#111827"><tspan font-weight="bold">1.</tspan> Save the row: Products (p9, 6, S2)</text>
+  <text x="82" y="182" font-size="12" fill="#6b7280">the application's ordinary save</text>
+  <line x1="265" y1="188" x2="265" y2="206" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="70" y="208" width="390" height="56" rx="6" fill="#ffffff" stroke="#9ca3af"/>
+  <text x="82" y="226" font-size="13" fill="#111827"><tspan font-weight="bold">2.</tspan> fn_ResourceAncestors(S2), inside the database:</text>
+  <text x="82" y="244" font-size="13" fill="#111827">S2, R1, C1, D1, root (the active path, within the depth bound)</text>
+  <text x="82" y="258" font-size="12" fill="#6b7280">the same ancestor rule the access check uses</text>
+  <line x1="265" y1="264" x2="265" y2="282" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="70" y="284" width="390" height="92" rx="6" fill="#ffffff" stroke="#9ca3af"/>
+  <text x="82" y="302" font-size="13" fill="#111827"><tspan font-weight="bold">3.</tspan> Insert one entry per ancestor into every copy:</text>
+  <g font-size="12" fill="#374151">
+    <text x="96" y="322">Price copy: (S2,6,p9) (R1,6,p9) (C1,6,p9) (D1,6,p9) (root,6,p9)</text>
+    <text x="96" y="340">Id copy: (S2,p9) (R1,p9) (C1,p9) (D1,p9) (root,p9)</text>
+    <text x="96" y="358">... one line per index on Products</text>
+  </g>
+  <line x1="265" y1="376" x2="265" y2="394" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="82" y="408" font-size="13" fill="#111827" font-weight="bold">Commit, or roll back, together.</text>
+  <text x="56" y="438" font-size="13" fill="#374151">Cost: levels × copies entries, here 5 × 2.</text>
+  <text x="56" y="456" font-size="13" fill="#374151">Measured: 1.4 ms to 5.7 ms per insert with three copies.</text>
+
+  <!-- Right: move -->
+  <rect x="510" y="70" width="450" height="400" rx="8" fill="#ffffff" stroke="#374151" stroke-width="1.5"/>
+  <text x="526" y="98" font-size="17" font-weight="bold" fill="#111827">Move region R1 from chain C1 to chain C2</text>
+  <rect x="526" y="114" width="418" height="300" rx="6" fill="#f9fafb" stroke="#9ca3af" stroke-dasharray="6 4"/>
+  <text x="540" y="136" font-size="13" font-weight="bold" fill="#6b7280">one transaction</text>
+
+  <rect x="540" y="148" width="390" height="40" rx="6" fill="#ffffff" stroke="#9ca3af"/>
+  <text x="552" y="166" font-size="13" fill="#111827"><tspan font-weight="bold">1.</tspan> Save the resource: R1.ParentId = C2</text>
+  <text x="552" y="182" font-size="12" fill="#6b7280">the resource row changes; the product rows do not</text>
+  <line x1="735" y1="188" x2="735" y2="206" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="540" y="208" width="390" height="56" rx="6" fill="#ffffff" stroke="#9ca3af"/>
+  <text x="552" y="226" font-size="13" fill="#111827"><tspan font-weight="bold">2.</tspan> Walk R1's subtree (a recursive query, bounded by the depth):</text>
+  <text x="552" y="244" font-size="13" fill="#111827">R1, S1, S2, ... and every product under them</text>
+  <text x="552" y="258" font-size="12" fill="#6b7280">only moved or deactivated resources are walked</text>
+  <line x1="735" y1="264" x2="735" y2="282" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <rect x="540" y="284" width="390" height="92" rx="6" fill="#ffffff" stroke="#9ca3af"/>
+  <text x="552" y="302" font-size="13" fill="#111827"><tspan font-weight="bold">3.</tspan> In every copy, delete those rows' entries and reinsert them</text>
+  <text x="552" y="320" font-size="13" fill="#111827">along the new path:</text>
+  <g font-size="12" fill="#374151">
+    <text x="566" y="340">before: (S1,3,p1) (R1,3,p1) (C1,3,p1) (D1,3,p1) (root,3,p1)</text>
+    <text x="566" y="358">after:  (S1,3,p1) (R1,3,p1) (C2,3,p1) (D2,3,p1) (root,3,p1)</text>
+  </g>
+  <line x1="735" y1="376" x2="735" y2="394" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="552" y="408" font-size="13" fill="#111827" font-weight="bold">Commit, or roll back, together.</text>
+  <text x="526" y="438" font-size="13" fill="#374151">Cost: subtree rows × levels × copies.</text>
+  <text x="526" y="456" font-size="13" fill="#374151">Measured: 501 ms to move 2,000 products with three copies.</text>
+
+  <!-- Bottom notes -->
+  <rect x="40" y="490" width="920" height="150" rx="6" fill="#f3f4f6" stroke="#d1d5db"/>
+  <text x="56" y="516" font-size="14" font-weight="bold" fill="#111827">What the copies never do</text>
+  <text x="56" y="538" font-size="13" fill="#374151">They never decide access. Every page is checked against fn_IsResourceAccessible before it is returned,</text>
+  <text x="56" y="556" font-size="13" fill="#374151">so a stale or wrong entry can hide a row and can never show one.</text>
+  <text x="56" y="582" font-size="14" font-weight="bold" fill="#111827">Writes that bypass the mapper</text>
+  <text x="56" y="604" font-size="13" fill="#374151">Bulk loads, raw SQL and bulk updates do not pass through the save. One command, RebuildPageOrdersAsync, deletes and</text>
+  <text x="56" y="622" font-size="13" fill="#374151">rewrites every copy from the application tables and the resource graph. The same rebuild fills a new copy after an index is added.</text>
+</svg>

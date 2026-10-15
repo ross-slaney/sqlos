@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="790" viewBox="0 0 1000 790" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="790" fill="#ffffff"/>
+  <text x="40" y="40" font-size="24" font-weight="bold" fill="#111827">How a page is retrieved for a store manager who sees 100 of 1,000,000 products</text>
+
+  <!-- Input -->
+  <rect x="40" y="66" width="920" height="46" rx="8" fill="#f3f4f6" stroke="#9ca3af"/>
+  <text x="56" y="86" font-size="14" fill="#111827"><tspan font-weight="bold">Input:</tspan> the caller's principal ids, the permission "product.view", the query (Products sorted by Price), the previous cursor, page size 20.</text>
+  <text x="56" y="104" font-size="13" fill="#6b7280">Two small statements resolve the principals (the user and her groups) and the permission. Nothing about her grants leaves the database.</text>
+
+  <!-- Step 1 -->
+  <rect x="40" y="130" width="440" height="230" rx="8" fill="#ffffff" stroke="#374151" stroke-width="1.5"/>
+  <text x="56" y="156" font-size="17" font-weight="bold" fill="#111827">1. Scan step</text>
+  <text x="56" y="178" font-size="13" fill="#374151">Read the next 20 rows of the query in price order.</text>
+  <text x="56" y="196" font-size="13" fill="#374151">Tag each with fn_IsResourceAccessible in the same statement.</text>
+  <g font-size="12">
+    <rect x="56" y="210" width="400" height="20" fill="#e5e7eb"/>
+    <text x="62" y="224" font-weight="bold">Price</text><text x="130" y="224" font-weight="bold">Id</text><text x="250" y="224" font-weight="bold">visible?</text>
+    <rect x="56" y="230" width="400" height="18" fill="#ffffff" stroke="#e5e7eb"/><text x="62" y="243">0.01</text><text x="130" y="243">p48811</text><text x="250" y="243" fill="#dc2626">no</text>
+    <rect x="56" y="248" width="400" height="18" fill="#f9fafb" stroke="#e5e7eb"/><text x="62" y="261">0.02</text><text x="130" y="261">p1092</text><text x="250" y="261" fill="#dc2626">no</text>
+    <rect x="56" y="266" width="400" height="18" fill="#ffffff" stroke="#e5e7eb"/><text x="62" y="279">0.03</text><text x="130" y="279">p77250</text><text x="250" y="279" fill="#dc2626">no</text>
+    <rect x="56" y="284" width="400" height="18" fill="#f9fafb" stroke="#e5e7eb"/><text x="62" y="297">...</text><text x="130" y="297">17 more rows</text><text x="250" y="297" fill="#dc2626">no</text>
+  </g>
+  <text x="56" y="322" font-size="13" fill="#111827"><tspan font-weight="bold">Result:</tspan> 0 of 20 visible. An administrator would stop here with 20 visible.</text>
+  <text x="56" y="342" font-size="13" fill="#374151">Cost: 20 rows read, 20 access checks, whoever the caller is.</text>
+
+  <!-- Step 2 -->
+  <rect x="520" y="130" width="440" height="360" rx="8" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.5"/>
+  <text x="536" y="156" font-size="17" font-weight="bold" fill="#111827">2. Merge step (only when an index covers the order)</text>
+  <text x="536" y="178" font-size="13" fill="#374151">fn_PageNodes(principals, permission) returns her minimal granted</text>
+  <text x="536" y="196" font-size="13" fill="#374151">nodes, computed inside the database: here one node, her store S7.</text>
+  <text x="536" y="224" font-size="13" font-weight="bold" fill="#111827">SqlOSFgaPage_Products_Price, one index seek per node:</text>
+  <g font-size="12">
+    <rect x="536" y="232" width="400" height="20" fill="#e5e7eb"/>
+    <text x="542" y="246" font-weight="bold">NodeId</text><text x="640" y="246" font-weight="bold">Price</text><text x="740" y="246" font-weight="bold">RowKey</text>
+    <rect x="536" y="252" width="400" height="18" fill="#ffffff" stroke="#e5e7eb"/><text x="542" y="265" fill="#9ca3af">S6</text><text x="640" y="265" fill="#9ca3af">...</text><text x="740" y="265" fill="#9ca3af">...</text>
+    <rect x="536" y="270" width="400" height="18" fill="#dbeafe" stroke="#93c5fd"/><text x="542" y="283">S7</text><text x="640" y="283">4.10</text><text x="740" y="283">p3304</text>
+    <rect x="536" y="288" width="400" height="18" fill="#dbeafe" stroke="#93c5fd"/><text x="542" y="301">S7</text><text x="640" y="301">4.95</text><text x="740" y="301">p3417</text>
+    <rect x="536" y="306" width="400" height="18" fill="#dbeafe" stroke="#93c5fd"/><text x="542" y="319">S7</text><text x="640" y="319">5.20</text><text x="740" y="319">p3350</text>
+    <rect x="536" y="324" width="400" height="18" fill="#dbeafe" stroke="#93c5fd"/><text x="542" y="337">S7</text><text x="640" y="337">... 17 more, in price order</text>
+    <rect x="536" y="342" width="400" height="18" fill="#ffffff" stroke="#e5e7eb"/><text x="542" y="355" fill="#9ca3af">S8</text><text x="640" y="355" fill="#9ca3af">...</text><text x="740" y="355" fill="#9ca3af">...</text>
+  </g>
+  <text x="536" y="382" font-size="13" fill="#374151">Under each node: the next 20 entries after the cursor that pass</text>
+  <text x="536" y="400" font-size="13" fill="#374151">the query's filters. Merge the nodes' ranges by price and keep</text>
+  <text x="536" y="418" font-size="13" fill="#374151">the first 20 keys (CROSS APPLY / JOIN LATERAL).</text>
+  <text x="536" y="444" font-size="13" fill="#111827"><tspan font-weight="bold">Result:</tspan> 20 keys. Cost: one seek per node, about 20 entries each.</text>
+  <text x="536" y="464" font-size="13" fill="#374151">A caller with 100 stores: 100 seeks. The table's size never appears.</text>
+
+  <!-- arrows -->
+  <line x1="480" y1="245" x2="518" y2="245" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="260" y1="360" x2="260" y2="528" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="270" y="440" font-size="12" fill="#374151">20 visible rows (dense caller)</text>
+  <line x1="740" y1="490" x2="740" y2="528" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="750" y="514" font-size="12" fill="#374151">20 keys (sparse caller)</text>
+
+  <!-- Step 3 -->
+  <rect x="40" y="530" width="920" height="120" rx="8" fill="#ffffff" stroke="#374151" stroke-width="1.5"/>
+  <text x="56" y="556" font-size="17" font-weight="bold" fill="#111827">3. Load and final check</text>
+  <text x="56" y="578" font-size="13" fill="#374151">Load the 20 rows through the application's own query, with its includes and change tracking,</text>
+  <text x="56" y="596" font-size="13" fill="#374151">and apply fn_IsResourceAccessible once more to each row. A stale copy entry can hide a row; it can never return one the caller may not see.</text>
+  <text x="56" y="622" font-size="13" fill="#111827"><tspan font-weight="bold">Next cursor:</tspan> the price and id of the last row returned. The next page starts from there, in either step.</text>
+
+  <!-- Output -->
+  <line x1="500" y1="650" x2="500" y2="686" stroke="#374151" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="40" y="690" width="920" height="58" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="56" y="713" font-size="14" fill="#14532d"><tspan font-weight="bold">Output:</tspan> a page of 20 rows and a cursor. Rows read for this caller: 80 (20 scanned, 40 in the merge step, 20 loaded).</text>
+  <text x="56" y="735" font-size="14" fill="#14532d">Under the per-row check alone: 184,205 rows.</text>
+
+  <text x="40" y="774" font-size="13" fill="#6b7280">The scan step runs first because it costs twenty checks and settles the page for every caller who sees most of the table, without touching a copy.</text>
+</svg>
