@@ -102,48 +102,54 @@ def fig_sparse():
 # ---------------------------------------------------------------- Figure 2
 def fig_storage():
     body = []
-    # (a) resource tree
+    # (a) resource tree: root > D1 > C1 > {R1 > {S1, S2}, R2 > {S3}}
     body.append(text(20, 26, "(a)", size=16, weight="bold"))
     body.append(text(52, 26, "Resource tree", size=15))
-    cx = 165
-    for i, (lab, hl) in enumerate([("root", False), ("D1", False), ("C1", False), ("R1", True)]):
+    cx = 200
+    for i, lab in enumerate(["root", "D1", "C1"]):
         y = 42 + i * 40
-        body += node(cx, y, lab, h=26, fill=BLUE_FILL if hl else "#f3f4f6", stroke=BLUE if hl else LINE, sw=2 if hl else 1.2)
+        body += node(cx, y, lab, h=26)
         if i:
             body.append(line(cx, y - 14, cx, y))
-    ys = 42 + 4 * 40 + 8
-    for sx, lab in [(95, "S1"), (235, "S2")]:
-        body += node(sx, ys, lab, h=26)
-        body.append(line(cx, ys - 22, sx, ys))
-    yp = ys + 50
-    for px, sx, lab in [(55, 95, "p1"), (135, 95, "p2"), (195, 235, "p3"), (275, 235, "p4")]:
-        body += node(px, yp, lab, w=56, h=26, fill="#ffffff", dash="4 3")
+    yr = 42 + 3 * 40
+    body += node(120, yr, "R1", h=26, fill=BLUE_FILL, stroke=BLUE, sw=2)
+    body += node(300, yr, "R2", h=26)
+    body.append(line(cx, yr - 14, 120, yr))
+    body.append(line(cx, yr - 14, 300, yr))
+    ys = yr + 40
+    for sx, px, lab in [(60, 120, "S1"), (180, 120, "S2"), (300, 300, "S3")]:
+        body += node(sx, ys, lab, h=26, w=80)
+        body.append(line(px, ys - 14, sx, ys))
+    yp = ys + 46
+    for px, sx, lab in [(30, 60, "p1"), (92, 60, "p2"), (150, 180, "p3"), (212, 180, "p4"), (270, 300, "p5"), (332, 300, "p6")]:
+        body += node(px, yp, lab, w=52, h=26, fill="#ffffff", dash="4 3")
         body.append(line(sx, ys + 26, px, yp, dash="4 3", stroke=GRAY))
 
     # (b) application table
-    bx = 350
+    bx = 400
     body.append(text(bx, 26, "(b)", size=16, weight="bold"))
     body.append(text(bx + 32, 26, "Products", size=15))
     body += table(bx, 40, [50, 66, 108], ["Id", "Price", "ResourceId"],
-                  [["p1", "3", "S1"], ["p2", "9", "S1"], ["p3", "5", "S2"], ["p4", "7", "S2"]])
+                  [["p1", "3", "S1"], ["p2", "9", "S1"], ["p3", "5", "S2"], ["p4", "7", "S2"], ["p5", "1", "S3"], ["p6", "2", "S3"]], row_h=22)
 
     # (c) projection
-    px0 = 620
+    px0 = 660
     body.append(text(px0, 26, "(c)", size=16, weight="bold"))
     body.append(text(px0 + 32, 26, "Projection on (Price, Id)", size=15))
-    rows = [["S1", "3", "p1"], ["S1", "9", "p2"], ["S2", "5", "p3"], ["S2", "7", "p4"],
-            ["R1", "3", "p1"], ["R1", "5", "p3"], ["R1", "7", "p4"], ["R1", "9", "p2"]]
-    fills = [None] * 4 + [BLUE_FILL] * 4
-    body += table(px0, 40, [70, 70, 80], ["Node", "Price", "Id"], rows, fills=fills)
-    note_y = 40 + 24 * 9
-    body.append(rect(px0, note_y, 220, 24, fill="#ffffff", stroke="#d1d5db", sw=1))
-    body.append(text(px0 + 8, note_y + 17, "C1, D1, root: as R1", size=14, fill=GRAY, style="italic"))
-    top, bottom = 40 + 24 * 5, 40 + 24 * 9
+    rows = [["S1", "3", "p1"], ["S1", "9", "p2"], ["S2", "5", "p3"], ["S2", "7", "p4"], ["S3", "1", "p5"], ["S3", "2", "p6"],
+            ["R1", "3", "p1"], ["R1", "5", "p3"], ["R1", "7", "p4"], ["R1", "9", "p2"], ["R2", "1", "p5"], ["R2", "2", "p6"]]
+    fills = [None] * 6 + [BLUE_FILL] * 4 + [None] * 2
+    rh = 22
+    body += table(px0, 40, [70, 70, 80], ["Node", "Price", "Id"], rows, fills=fills, row_h=rh)
+    note_y = 40 + rh * 13
+    body.append(rect(px0, note_y, 220, rh, fill="#ffffff", stroke="#d1d5db", sw=1))
+    body.append(text(px0 + 8, note_y + 16, "C1, D1, root: all six", size=14, fill=GRAY, style="italic"))
+    top, bottom = 40 + rh * 7, 40 + rh * 11
     bx2 = px0 + 220 + 10
     body.append(f'<path d="M{bx2 - 4},{top + 2} L{bx2 + 6},{top + 2} L{bx2 + 6},{bottom - 2} L{bx2 - 4},{bottom - 2}" fill="none" stroke="{BLUE}" stroke-width="2"/>')
     body.append(text(bx2 + 14, (top + bottom) / 2 - 3, "range", size=15, fill=BLUE))
     body.append(text(bx2 + 14, (top + bottom) / 2 + 15, "of R1", size=15, fill=BLUE))
-    return svg(1000, 302, body)
+    return svg(1000, 362, body)
 
 
 # ---------------------------------------------------------------- Figure 3
@@ -156,38 +162,35 @@ def fig_retrieval():
         body.append(text(x, 26, letter, size=16, weight="bold"))
         body.append(text(x + 32, 26, head, size=15))
 
-    # (a) first 20 rows of Q after u in (Price, Id) order, each tagged by the access function
+    # (a) first 2 products in price order, each checked
     x = xs[0]
-    body.append(text(x, 54, "first 20 rows of Q after u, in (Price, Id) order", size=14, fill=GRAY))
-    rows = [["row 1", "no"], ["row 2", "no"], ["row 3", "no"], ["...", "..."], ["row 20", "no"]]
-    body += table(x, 66, [150, 140], ["Row", "authorized"], rows, colors=[RED, RED, RED, GRAY, RED])
-    body.append(text(x, 66 + 24 * 6 + 24, "0 of 20 rows authorized", size=15))
-    body.append(text(x, 66 + 24 * 6 + 46, "rows read: 20", size=15, weight="bold"))
+    body.append(text(x, 54, "first 2 products in price order, each checked", size=14, fill=GRAY))
+    rows = [["p5", "1", "S3", "no"], ["p6", "2", "S3", "no"]]
+    body += table(x, 66, [50, 56, 66, 108], ["Id", "Price", "Store", "Lee may view"], rows, colors=[RED, RED])
+    body.append(text(x, 66 + 24 * 3 + 24, "0 of 2 authorized: page not complete", size=15))
+    body.append(text(x, 66 + 24 * 3 + 46, "rows read: 2", size=15, weight="bold"))
 
-    # (b) scope function and the store's range in the projection
+    # (b) scopes and the range of R1
     x = xs[1]
-    body.append(text(x, 54, "scopes S(p, perm) = {S7}", size=14, fill=GRAY))
-    rows = [["S6", "..."], ["S7", "1st entry after u"], ["S7", "2nd entry after u"], ["S7", "..."],
-            ["S7", "20th entry after u"], ["S8", "..."]]
-    fills = [None, BLUE_FILL, BLUE_FILL, BLUE_FILL, BLUE_FILL, None]
-    colors = [GRAY, INK, INK, INK, INK, GRAY]
-    body += table(x, 66, [70, 220], ["Node", "(Price, Id)"], rows, fills=fills, colors=colors)
-    body.append(text(x, 66 + 24 * 7 + 24, "first 20 entries of the range of S7", size=15))
-    body.append(text(x, 66 + 24 * 7 + 46, "rows read: 40 (20 entries, 20 rows)", size=15, weight="bold"))
+    body.append(text(x, 54, "scopes of Lee for “view products”: {R1}", size=14, fill=GRAY))
+    rows = [["R1", "3", "p1", "read"], ["R1", "5", "p3", "read"], ["R1", "7", "p4", "not read"], ["R1", "9", "p2", "not read"]]
+    fills = [BLUE_FILL, BLUE_FILL, None, None]
+    colors = [INK, INK, GRAY, GRAY]
+    body += table(x, 66, [60, 60, 60, 110], ["Node", "Price", "Id", ""], rows, fills=fills, colors=colors)
+    body.append(text(x, 66 + 24 * 5 + 24, "first 2 entries of the range of R1", size=15))
+    body.append(text(x, 66 + 24 * 5 + 46, "rows read: 4 (2 entries, 2 products)", size=15, weight="bold"))
 
     # (c) verification
     x = xs[2]
-    body.append(text(x, 54, "the 20 selected rows, loaded by key", size=14, fill=GRAY))
-    rows = [["row 1", "yes"], ["row 2", "yes"], ["...", "..."], ["row 20", "yes"]]
-    body += table(x, 66, [150, 140], ["Row", "authorized"], rows, colors=[GREEN, GREEN, GRAY, GREEN])
-    body.append(text(x, 66 + 24 * 5 + 24, "page of 20 rows; cursor = (Price, Id)", size=15))
-    body.append(text(x, 66 + 24 * 5 + 44, "of the last selected entry", size=15))
-    body.append(text(x, 66 + 24 * 5 + 68, "rows read: 20", size=15, weight="bold"))
+    body.append(text(x, 54, "the selected products, loaded by Id", size=14, fill=GRAY))
+    rows = [["p1", "3", "S1", "yes"], ["p3", "5", "S2", "yes"]]
+    body += table(x, 66, [50, 56, 66, 108], ["Id", "Price", "Store", "Lee may view"], rows, colors=[GREEN, GREEN])
+    body.append(text(x, 66 + 24 * 3 + 24, "page: p1, p3; cursor: (5, p3)", size=15))
+    body.append(text(x, 66 + 24 * 3 + 46, "rows read: 2", size=15, weight="bold"))
 
-    # arrows between panels
-    body.append(line(xs[0] + w + 6, 120, xs[1] - 8, 120, arrow=True, sw=1.6))
-    body.append(line(xs[1] + w + 6, 120, xs[2] - 8, 120, arrow=True, sw=1.6))
-    return svg(1000, 286, body)
+    body.append(line(xs[0] + w + 6, 110, xs[1] - 8, 110, arrow=True, sw=1.6))
+    body.append(line(xs[1] + w + 6, 110, xs[2] - 8, 110, arrow=True, sw=1.6))
+    return svg(1000, 262, body)
 
 
 # ---------------------------------------------------------------- Figure 4

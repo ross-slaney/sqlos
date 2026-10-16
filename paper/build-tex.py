@@ -125,8 +125,8 @@ for l in body_lines:
         figure_numbers[key] = im.group(1)
         converted += [f"IMGPLACEHOLDER{key}", "", f"IMGCAPTION{key}: {cite(plain(im.group(2)))}"]
         continue
-    # Table 1 is the one prose table; give its columns proportional widths so pandoc wraps them.
-    if l.strip() == "| --- | --- | --- |" and not table1_fixed:
+    # The Azure/SHRBAC comparison is the one prose table; give its columns proportional widths so pandoc wraps them.
+    if l.strip() == "| --- | --- | --- |" and not table1_fixed and "| Concept | Azure RBAC | SHRBAC |" in converted[-1]:
         l = "| " + "-" * 16 + " | " + "-" * 42 + " | " + "-" * 42 + " |"
         table1_fixed = True
     converted.append(cite(plain(l)))
@@ -167,7 +167,7 @@ longtable = re.compile(
     r"(.*?)\\end\{longtable\}\n\}",
     re.S,
 )
-SINGLE_COLUMN_TABLES = {"7", "8"}
+SINGLE_COLUMN_TABLES = {"1", "8", "9"}
 
 
 def to_float(m):
