@@ -107,15 +107,15 @@ def fig_storage():
     body.append(text(52, 26, "Resource tree", size=15))
     cx = 165
     for i, (lab, hl) in enumerate([("root", False), ("D1", False), ("C1", False), ("R1", True)]):
-        y = 42 + i * 46
+        y = 42 + i * 40
         body += node(cx, y, lab, h=26, fill=BLUE_FILL if hl else "#f3f4f6", stroke=BLUE if hl else LINE, sw=2 if hl else 1.2)
         if i:
-            body.append(line(cx, y - 20, cx, y))
-    ys = 42 + 4 * 46 + 8
+            body.append(line(cx, y - 14, cx, y))
+    ys = 42 + 4 * 40 + 8
     for sx, lab in [(95, "S1"), (235, "S2")]:
         body += node(sx, ys, lab, h=26)
-        body.append(line(cx, ys - 28, sx, ys))
-    yp = ys + 56
+        body.append(line(cx, ys - 22, sx, ys))
+    yp = ys + 50
     for px, sx, lab in [(55, 95, "p1"), (135, 95, "p2"), (195, 235, "p3"), (275, 235, "p4")]:
         body += node(px, yp, lab, w=56, h=26, fill="#ffffff", dash="4 3")
         body.append(line(sx, ys + 26, px, yp, dash="4 3", stroke=GRAY))
@@ -143,7 +143,7 @@ def fig_storage():
     body.append(f'<path d="M{bx2 - 4},{top + 2} L{bx2 + 6},{top + 2} L{bx2 + 6},{bottom - 2} L{bx2 - 4},{bottom - 2}" fill="none" stroke="{BLUE}" stroke-width="2"/>')
     body.append(text(bx2 + 14, (top + bottom) / 2 - 3, "range", size=15, fill=BLUE))
     body.append(text(bx2 + 14, (top + bottom) / 2 + 15, "of R1", size=15, fill=BLUE))
-    return svg(1000, 330, body)
+    return svg(1000, 302, body)
 
 
 # ---------------------------------------------------------------- Figure 3
@@ -199,13 +199,13 @@ def fig_maintenance():
     cx = 80
     chain = ["root", "D1", "C1", "R1", "S2"]
     for i, lab in enumerate(chain):
-        y = 44 + i * 46
+        y = 44 + i * 40
         body += node(cx, y, lab, w=80, h=26)
         if i:
-            body.append(line(cx, y - 20, cx, y))
-    yp = 44 + 5 * 46
+            body.append(line(cx, y - 14, cx, y))
+    yp = 44 + 5 * 40
     body += node(cx, yp, "p9", w=56, h=26, fill=GREEN_FILL, stroke=GREEN, sw=1.6)
-    body.append(line(cx, yp - 20, cx, yp, stroke=GREEN, sw=1.6))
+    body.append(line(cx, yp - 14, cx, yp, stroke=GREEN, sw=1.6))
     body.append(text(190, 54, "entries inserted into the projection on (Price, Id)", size=14, fill=GRAY))
     rows = [["+", "S2", "6", "p9"], ["+", "R1", "6", "p9"], ["+", "C1", "6", "p9"], ["+", "D1", "6", "p9"], ["+", "root", "6", "p9"]]
     body += table(190, 66, [36, 80, 70, 70], ["", "Node", "Price", "Id"], rows,
@@ -217,17 +217,17 @@ def fig_maintenance():
     body.append(text(x0 + 32, 26, "Move of R1 from C1 to C2", size=15))
     body += node(x0 + 120, 44, "root", w=80, h=26)
     for dx, d, c in [(60, "D1", "C1"), (180, "D2", "C2")]:
-        body += node(x0 + dx, 92, d, w=70, h=26)
-        body.append(line(x0 + 120, 70, x0 + dx, 92))
-        body += node(x0 + dx, 140, c, w=70, h=26)
-        body.append(line(x0 + dx, 118, x0 + dx, 140))
-    body += node(x0 + 180, 196, "R1", w=70, h=26, fill=BLUE_FILL, stroke=BLUE, sw=2)
-    body.append(line(x0 + 180, 166, x0 + 180, 196, stroke=BLUE, sw=2))
-    body.append(line(x0 + 60, 166, x0 + 160, 196, dash="5 4", stroke=GRAY))
-    body += node(x0 + 180, 246, "S1, S2", w=70, h=26)
-    body.append(line(x0 + 180, 222, x0 + 180, 246))
-    body += node(x0 + 180, 296, "p1 ... p4", w=84, h=26, fill="#ffffff", dash="4 3")
-    body.append(line(x0 + 180, 272, x0 + 180, 296, dash="4 3", stroke=GRAY))
+        body += node(x0 + dx, 86, d, w=70, h=26)
+        body.append(line(x0 + 120, 70, x0 + dx, 86))
+        body += node(x0 + dx, 128, c, w=70, h=26)
+        body.append(line(x0 + dx, 112, x0 + dx, 128))
+    body += node(x0 + 180, 176, "R1", w=70, h=26, fill=BLUE_FILL, stroke=BLUE, sw=2)
+    body.append(line(x0 + 180, 154, x0 + 180, 176, stroke=BLUE, sw=2))
+    body.append(line(x0 + 60, 154, x0 + 160, 176, dash="5 4", stroke=GRAY))
+    body += node(x0 + 180, 218, "S1, S2", w=70, h=26)
+    body.append(line(x0 + 180, 202, x0 + 180, 218))
+    body += node(x0 + 180, 260, "p1 ... p4", w=84, h=26, fill="#ffffff", dash="4 3")
+    body.append(line(x0 + 180, 244, x0 + 180, 260, dash="4 3", stroke=GRAY))
 
     tx = x0 + 280
     body.append(text(tx, 54, "entries of p1 (Price 3)", size=14, fill=GRAY))
@@ -237,7 +237,7 @@ def fig_maintenance():
     body.append(text(tx, 66 + 24 * 5 + 22, "S1, R1, root:", size=14, fill=GRAY))
     body.append(text(tx, 66 + 24 * 5 + 40, "rewritten unchanged", size=14, fill=GRAY))
     body.append(text(tx, 66 + 24 * 5 + 66, "p2, p3, p4: likewise", size=14, fill=GRAY))
-    return svg(1000, 336, body)
+    return svg(1000, 300, body)
 
 
 for name, fn in [("sparse-problem", fig_sparse), ("storage", fig_storage), ("retrieval", fig_retrieval),
