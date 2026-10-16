@@ -2,7 +2,7 @@
 <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/></marker></defs>
 <rect width="1000" height="266" fill="#ffffff"/>
 <text x="20.0" y="30.0" font-size="16" fill="#111827" text-anchor="start" font-weight="bold" font-style="normal">(a)</text>
-<text x="52.0" y="30.0" font-size="15" fill="#111827" text-anchor="start" font-weight="normal" font-style="normal">Caller with 100 authorized rows distributed through the order</text>
+<text x="52.0" y="30.0" font-size="15" fill="#111827" text-anchor="start" font-weight="normal" font-style="normal">100 authorized rows spread through the order</text>
 <text x="82.0" y="63.0" font-size="14" fill="#6b7280" text-anchor="end" font-weight="normal" font-style="normal">1</text>
 <text x="918.0" y="63.0" font-size="14" fill="#6b7280" text-anchor="start" font-weight="normal" font-style="normal">1,000,000</text>
 <rect x="90.0" y="40.0" width="151.0" height="34.0" rx="0" fill="#d1d5db" stroke="none" stroke-width="0"/>
@@ -35,7 +35,7 @@
 <path d="M90,82 L90,88 L241.0,88 L241.0,82" fill="none" stroke="#111827" stroke-width="1.2"/>
 <text x="165.5" y="106.0" font-size="15" fill="#111827" text-anchor="middle" font-weight="normal" font-style="normal">R = 184,205</text>
 <text x="20.0" y="140.0" font-size="16" fill="#111827" text-anchor="start" font-weight="bold" font-style="normal">(b)</text>
-<text x="52.0" y="140.0" font-size="15" fill="#111827" text-anchor="start" font-weight="normal" font-style="normal">Caller with 20,000 authorized rows at the end of the order</text>
+<text x="52.0" y="140.0" font-size="15" fill="#111827" text-anchor="start" font-weight="normal" font-style="normal">20,000 authorized rows at the end of the order</text>
 <text x="82.0" y="173.0" font-size="14" fill="#6b7280" text-anchor="end" font-weight="normal" font-style="normal">1</text>
 <text x="918.0" y="173.0" font-size="14" fill="#6b7280" text-anchor="start" font-weight="normal" font-style="normal">1,000,000</text>
 <rect x="90.0" y="150.0" width="803.6" height="34.0" rx="0" fill="#d1d5db" stroke="none" stroke-width="0"/>

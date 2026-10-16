@@ -69,7 +69,7 @@ def fig_sparse():
 
     # (a) 100 authorized rows spread through the order; each mark stands for 4 rows.
     ya = 40
-    bar(ya, "(a)", "Caller with 100 authorized rows distributed through the order")
+    bar(ya, "(a)", "100 authorized rows spread through the order")
     examined_a = width * 184205 / 1_000_000
     body.append(rect(x0, ya, examined_a, 34, fill=SHADE, stroke="none", sw=0))
     body.append(rect(x0, ya, width, 34, fill="none", stroke=LINE, sw=1.2))
@@ -81,7 +81,7 @@ def fig_sparse():
 
     # (b) 20,000 authorized rows at the end of the order.
     yb = 150
-    bar(yb, "(b)", "Caller with 20,000 authorized rows at the end of the order")
+    bar(yb, "(b)", "20,000 authorized rows at the end of the order")
     examined_b = width * 980020 / 1_000_000
     start_b = width * 980000 / 1_000_000
     body.append(rect(x0, yb, examined_b, 34, fill=SHADE, stroke="none", sw=0))
@@ -151,7 +151,7 @@ def fig_retrieval():
     body = []
     w = 290
     xs = [20, 355, 690]
-    heads = [("(a)", "Scan phase"), ("(b)", "Merge phase"), ("(c)", "Verification")]
+    heads = [("(a)", "Scan"), ("(b)", "Merge"), ("(c)", "Verification")]
     for x, (letter, head) in zip(xs, heads):
         body.append(text(x, 26, letter, size=16, weight="bold"))
         body.append(text(x + 32, 26, head, size=15))

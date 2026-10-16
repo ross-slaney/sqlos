@@ -205,7 +205,7 @@ SERIES_STYLE = {
     "B": "fill=blue!60!black, draw=blue!60!black",
     "C": "fill=gray!55, draw=gray!70!black",
 }
-LEGEND = r"\legend{A: predicate evaluation, B: projections, C: closure enumeration}"
+LEGEND = r"\legend{A: checking rows in order, B: projections, C: closure enumeration}"
 charts = {
     "rowsread": r"""
 \begin{figure}[!t]
@@ -216,7 +216,7 @@ charts = {
     symbolic x coords={Administrator,Region manager,Store manager,100 stores,10k products,Far end,Scoped},
     xtick=data, x tick label style={rotate=30, anchor=east, font=\scriptsize},
     ylabel={Rows read per page}, width=0.97\columnwidth, height=5.4cm,
-    enlarge x limits=0.1, legend style={font=\scriptsize, at={(0.5,1.03)}, anchor=south, legend columns=3},
+    enlarge x limits=0.1, legend style={font=\scriptsize, at={(0.5,1.03)}, anchor=south, legend columns=2},
     every axis label/.style={font=\small}, every tick label/.style={font=\scriptsize},
 ]
 \addplot[STYLEA] coordinates {(Administrator,20) (Region manager,9306) (Store manager,184205) (100 stores,2233) (10k products,1452) (Far end,980020) (Scoped,20)};
@@ -237,7 +237,7 @@ LEGEND
     xlabel={Share of the table authorized for the caller}, ylabel={Rows read per page},
     width=0.92\columnwidth, height=5.4cm, grid=major, grid style={gray!20},
     ymin=30, ymax=600000,
-    legend style={font=\scriptsize, at={(0.5,1.03)}, anchor=south, legend columns=3},
+    legend style={font=\scriptsize, at={(0.5,1.03)}, anchor=south, legend columns=2},
     every axis label/.style={font=\small}, every tick label/.style={font=\scriptsize},
     xtick={0.0001,0.001,0.01,0.1}, xticklabels={0.01\%,0.1\%,1\%,10\%}, xmax=0.1,
 ]
