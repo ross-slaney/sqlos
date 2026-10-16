@@ -1,45 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560" font-family="Helvetica, Arial, sans-serif">
-  <rect width="1000" height="560" fill="#ffffff"/>
-  <text x="40" y="40" font-size="24" font-weight="bold" fill="#111827">Why a per-row check reads the table for a sparse caller</text>
-  <text x="40" y="66" font-size="16" fill="#374151">The Products table has an index on Price. The database can read rows from cheapest to dearest,</text>
-  <text x="40" y="86" font-size="16" fill="#374151">but it cannot tell which rows the caller may see without testing each one.</text>
-
-  <!-- Panel A: store manager -->
-  <text x="40" y="112" font-size="18" font-weight="bold" fill="#111827">Store manager: 100 of 1,000,000 products, spread through the price order</text>
-  <text x="60" y="137" font-size="14" fill="#6b7280">cheapest</text>
-  <text x="940" y="137" font-size="14" fill="#6b7280" text-anchor="end">dearest</text>
-  <!-- scanned region -->
-  <rect x="60" y="146" width="162" height="44" fill="#fee2e2"/>
-  <rect x="60" y="146" width="880" height="44" fill="none" stroke="#374151" stroke-width="1.5"/>
-  <!-- her rows: red ticks, spread -->
-  <g stroke="#dc2626" stroke-width="2">
-    <line x1="71" y1="150" x2="71" y2="186"/><line x1="98" y1="150" x2="98" y2="186"/><line x1="131" y1="150" x2="131" y2="186"/><line x1="166" y1="150" x2="166" y2="186"/><line x1="203" y1="150" x2="203" y2="186"/>
-    <line x1="239" y1="150" x2="239" y2="186"/><line x1="268" y1="150" x2="268" y2="186"/><line x1="301" y1="150" x2="301" y2="186"/><line x1="347" y1="150" x2="347" y2="186"/><line x1="376" y1="150" x2="376" y2="186"/>
-    <line x1="412" y1="150" x2="412" y2="186"/><line x1="449" y1="150" x2="449" y2="186"/><line x1="481" y1="150" x2="481" y2="186"/><line x1="523" y1="150" x2="523" y2="186"/><line x1="556" y1="150" x2="556" y2="186"/>
-    <line x1="590" y1="150" x2="590" y2="186"/><line x1="627" y1="150" x2="627" y2="186"/><line x1="661" y1="150" x2="661" y2="186"/><line x1="698" y1="150" x2="698" y2="186"/><line x1="734" y1="150" x2="734" y2="186"/>
-    <line x1="769" y1="150" x2="769" y2="186"/><line x1="803" y1="150" x2="803" y2="186"/><line x1="838" y1="150" x2="838" y2="186"/><line x1="871" y1="150" x2="871" y2="186"/><line x1="912" y1="150" x2="912" y2="186"/>
-  </g>
-  <!-- scan arrow and bracket -->
-  <line x1="60" y1="208" x2="222" y2="208" stroke="#991b1b" stroke-width="2"/>
-  <polygon points="222,208 212,203 212,213" fill="#991b1b"/>
-  <text x="60" y="232" font-size="14" fill="#991b1b">The scan tests rows from the left: 184,205 rows tested before 20 of hers are found (PostgreSQL)</text>
-  <text x="60" y="252" font-size="14" fill="#374151">Red marks: her 100 rows. Every other row is tested and rejected.</text>
-
-  <!-- Panel B: far end -->
-  <text x="40" y="306" font-size="18" font-weight="bold" fill="#111827">Far-end caller: 20,000 products, all at the dear end of the price order</text>
-  <text x="60" y="331" font-size="14" fill="#6b7280">cheapest</text>
-  <text x="940" y="331" font-size="14" fill="#6b7280" text-anchor="end">dearest</text>
-  <rect x="60" y="340" width="862" height="44" fill="#fee2e2"/>
-  <rect x="922" y="340" width="18" height="44" fill="#dc2626"/>
-  <rect x="60" y="340" width="880" height="44" fill="none" stroke="#374151" stroke-width="1.5"/>
-  <line x1="60" y1="402" x2="922" y2="402" stroke="#991b1b" stroke-width="2"/>
-  <polygon points="922,402 912,397 912,407" fill="#991b1b"/>
-  <text x="60" y="426" font-size="14" fill="#991b1b">980,020 rows tested before the first row of hers appears (PostgreSQL); 44 seconds for one page of 20</text>
-  <text x="60" y="446" font-size="14" fill="#374151">Red block: her 20,000 rows, contiguous but at the end. The scan has no way to jump to them.</text>
-
-  <!-- Footer -->
-  <rect x="40" y="476" width="920" height="76" rx="6" fill="#f3f4f6" stroke="#d1d5db"/>
-  <text x="56" y="500" font-size="15" fill="#111827" font-weight="bold">The planner cannot help.</text>
-  <text x="56" y="522" font-size="14" fill="#374151">"Visible to this caller" is not a column. It depends on the caller's grants and the row's place in the tree,</text>
-  <text x="56" y="540" font-size="14" fill="#374151">so no index on the table makes the visible rows contiguous.</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="266" viewBox="0 0 1000 266" font-family="Helvetica, Arial, sans-serif">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#374151"/></marker></defs>
+<rect width="1000" height="266" fill="#ffffff"/>
+<text x="20.0" y="30.0" font-size="16" fill="#111827" text-anchor="start" font-weight="bold" font-style="normal">(a)</text>
+<text x="52.0" y="30.0" font-size="15" fill="#111827" text-anchor="start" font-weight="normal" font-style="normal">Caller with 100 authorized rows distributed through the order</text>
+<text x="82.0" y="63.0" font-size="14" fill="#6b7280" text-anchor="end" font-weight="normal" font-style="normal">1</text>
+<text x="918.0" y="63.0" font-size="14" fill="#6b7280" text-anchor="start" font-weight="normal" font-style="normal">1,000,000</text>
+<rect x="90.0" y="40.0" width="151.0" height="34.0" rx="0" fill="#d1d5db" stroke="none" stroke-width="0"/>
+<rect x="90.0" y="40.0" width="820.0" height="34.0" rx="0" fill="none" stroke="#374151" stroke-width="1.2"/>
+<line x1="109.7" y1="44.0" x2="109.7" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="142.5" y1="44.0" x2="142.5" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="175.3" y1="44.0" x2="175.3" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="208.1" y1="44.0" x2="208.1" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="240.9" y1="44.0" x2="240.9" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="273.7" y1="44.0" x2="273.7" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="306.5" y1="44.0" x2="306.5" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="339.3" y1="44.0" x2="339.3" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="372.1" y1="44.0" x2="372.1" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="404.9" y1="44.0" x2="404.9" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="437.7" y1="44.0" x2="437.7" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="470.5" y1="44.0" x2="470.5" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="503.3" y1="44.0" x2="503.3" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="536.1" y1="44.0" x2="536.1" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="568.9" y1="44.0" x2="568.9" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="601.7" y1="44.0" x2="601.7" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="634.5" y1="44.0" x2="634.5" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="667.3" y1="44.0" x2="667.3" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="700.1" y1="44.0" x2="700.1" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="732.9" y1="44.0" x2="732.9" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="765.7" y1="44.0" x2="765.7" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="798.5" y1="44.0" x2="798.5" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="831.3" y1="44.0" x2="831.3" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="864.1" y1="44.0" x2="864.1" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<line x1="896.9" y1="44.0" x2="896.9" y2="70.0" stroke="#b91c1c" stroke-width="2.4"/>
+<path d="M90,82 L90,88 L241.0,88 L241.0,82" fill="none" stroke="#111827" stroke-width="1.2"/>
+<text x="165.5" y="106.0" font-size="15" fill="#111827" text-anchor="middle" font-weight="normal" font-style="normal">R = 184,205</text>
+<text x="20.0" y="140.0" font-size="16" fill="#111827" text-anchor="start" font-weight="bold" font-style="normal">(b)</text>
+<text x="52.0" y="140.0" font-size="15" fill="#111827" text-anchor="start" font-weight="normal" font-style="normal">Caller with 20,000 authorized rows at the end of the order</text>
+<text x="82.0" y="173.0" font-size="14" fill="#6b7280" text-anchor="end" font-weight="normal" font-style="normal">1</text>
+<text x="918.0" y="173.0" font-size="14" fill="#6b7280" text-anchor="start" font-weight="normal" font-style="normal">1,000,000</text>
+<rect x="90.0" y="150.0" width="803.6" height="34.0" rx="0" fill="#d1d5db" stroke="none" stroke-width="0"/>
+<rect x="893.6" y="154.0" width="16.4" height="26.0" rx="0" fill="#b91c1c" stroke="none" stroke-width="0"/>
+<rect x="90.0" y="150.0" width="820.0" height="34.0" rx="0" fill="none" stroke="#374151" stroke-width="1.2"/>
+<path d="M90,192 L90,198 L893.6,198 L893.6,192" fill="none" stroke="#111827" stroke-width="1.2"/>
+<text x="491.8" y="216.0" font-size="15" fill="#111827" text-anchor="middle" font-weight="normal" font-style="normal">R = 980,020</text>
+<line x1="90.0" y1="240.0" x2="90.0" y2="254.0" stroke="#b91c1c" stroke-width="2.4"/>
+<text x="100.0" y="252.0" font-size="14" fill="#6b7280" text-anchor="start" font-weight="normal" font-style="normal">authorized rows (in (a), each mark stands for 4 rows)</text>
+<rect x="520.0" y="240.0" width="22.0" height="14.0" rx="0" fill="#d1d5db" stroke="none" stroke-width="0"/>
+<text x="550.0" y="252.0" font-size="14" fill="#6b7280" text-anchor="start" font-weight="normal" font-style="normal">rows examined up to the 20th authorized row</text>
 </svg>
