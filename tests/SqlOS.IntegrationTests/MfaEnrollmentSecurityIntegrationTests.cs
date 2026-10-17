@@ -812,7 +812,6 @@ public sealed class MfaEnrollmentSecurityIntegrationTests
             builder.Services.RemoveAll<IHostedService>();
 
             var app = builder.Build();
-            app.MapAuthServer("/sqlos/auth");
             await app.StartAsync();
 
             await using var scope = app.Services.CreateAsyncScope();

@@ -14,7 +14,7 @@ namespace SqlOS.Email.Extensions;
 
 public static class EndpointRouteBuilderExtensions
 {
-    public static IEndpointRouteBuilder MapSqlOSEmailAdmin(
+    internal static IEndpointRouteBuilder MapSqlOSEmailAdmin(
         this IEndpointRouteBuilder endpoints,
         string dashboardBasePath)
     {

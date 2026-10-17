@@ -21,7 +21,7 @@ public static class WebApplicationExtensions
         SqlOSOptions sqlosOptions,
         SqlOSAuthServerOptions authOptions)
     {
-        endpoints.MapAuthServer(authOptions.BasePath);
+        endpoints.MapSqlOSAuthServerEndpoints(authOptions.BasePath);
         endpoints.MapSqlOSAuditLogsAdmin(sqlosOptions.DashboardBasePath);
         endpoints.MapSqlOSEmailAdmin(sqlosOptions.DashboardBasePath);
         if (sqlosOptions.Calendar.Enabled)

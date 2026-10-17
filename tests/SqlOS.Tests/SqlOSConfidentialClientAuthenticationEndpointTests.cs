@@ -613,7 +613,6 @@ public sealed class SqlOSConfidentialClientAuthenticationEndpointTests
                     .Configure(app =>
                     {
                         app.UseRouting();
-                        app.UseEndpoints(endpoints => endpoints.MapAuthServer("/sqlos/auth"));
                     }))
                 .StartAsync();
 

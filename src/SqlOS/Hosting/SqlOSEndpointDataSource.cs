@@ -5,39 +5,21 @@ using Microsoft.Extensions.Primitives;
 namespace SqlOS.Hosting;
 
 /// <summary>
-/// The endpoints SqlOS maps on the application's behalf. The auth-server/admin routes are withheld
-/// while <see cref="SqlOSEndpointMappingState.MappedByApplication"/> is set, so an obsolete
-/// manual <c>MapAuthServer()</c> call anywhere in application startup never
-/// produces duplicate routes, whether it runs before or after the SqlOS startup filter.
+/// The endpoints SqlOS maps on the application's behalf. They join the application's route table
+/// so one routing pass dispatches both.
 /// </summary>
 internal sealed class SqlOSEndpointDataSource : EndpointDataSource
 {
-    private readonly SqlOSEndpointMappingState _state;
-    private readonly IReadOnlyList<EndpointDataSource> _core;
-    private readonly IReadOnlyList<EndpointDataSource> _shared;
+    private readonly IReadOnlyList<EndpointDataSource> _sources;
 
-    public SqlOSEndpointDataSource(
-        SqlOSEndpointMappingState state,
-        IReadOnlyList<EndpointDataSource> core,
-        IReadOnlyList<EndpointDataSource> shared)
+    public SqlOSEndpointDataSource(IReadOnlyList<EndpointDataSource> sources)
     {
-        _state = state;
-        _core = core;
-        _shared = shared;
+        _sources = sources;
     }
 
     public override IReadOnlyList<Endpoint> Endpoints
-    {
-        get
-        {
-            var sources = _state.MappedByApplication ? _shared : _core.Concat(_shared);
-            return sources.SelectMany(source => source.Endpoints).ToArray();
-        }
-    }
+        => _sources.SelectMany(source => source.Endpoints).ToArray();
 
     public override IChangeToken GetChangeToken()
-        => new CompositeChangeToken(
-            _core.Concat(_shared).Select(source => source.GetChangeToken())
-                .Append(_state.GetChangeToken())
-                .ToArray());
+        => new CompositeChangeToken(_sources.Select(source => source.GetChangeToken()).ToArray());
 }

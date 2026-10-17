@@ -18,7 +18,7 @@ namespace SqlOS.Tests;
 public class SqlOSAuthEndpointRouteInventoryTests
 {
     [TestMethod]
-    public async Task MapAuthServer_RegistersCriticalRoutesWithUnchangedMethods()
+    public async Task AddSqlOS_RegistersCriticalRoutesWithUnchangedMethods()
     {
         await using var app = await CreateAppAsync();
         var actual = app.Services.GetRequiredService<EndpointDataSource>().Endpoints

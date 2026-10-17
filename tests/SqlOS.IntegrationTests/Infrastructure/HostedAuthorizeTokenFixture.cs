@@ -41,7 +41,6 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         Action<SqlOS.Configuration.SqlOSOptions>? configure = null,
         Action<IServiceCollection>? configureServices = null,
         Action<WebApplication>? configureApp = null,
-        bool mapAuthServer = true,
         bool seedBrowserClient = true)
     {
         await using var bootstrapContext = await AspireFixture.CreateIsolatedAuthContextAsync(databasePrefix);
@@ -73,11 +72,6 @@ public sealed class HostedAuthorizeTokenFixture : IAsyncDisposable
         configureServices?.Invoke(builder.Services);
 
         var app = builder.Build();
-        if (mapAuthServer)
-        {
-            app.MapAuthServer("/sqlos/auth");
-        }
-
         configureApp?.Invoke(app);
         await using (var scope = app.Services.CreateAsyncScope())
         {

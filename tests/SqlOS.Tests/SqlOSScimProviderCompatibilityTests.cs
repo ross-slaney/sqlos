@@ -1257,10 +1257,8 @@ public sealed class SqlOSScimProviderCompatibilityTests
                 options.AuthServer.ScimBasePath = ScimBasePath;
             });
             builder.Services.RemoveAll<IHostedService>();
-            builder.Services.RemoveAll<IStartupFilter>();
 
             var app = builder.Build();
-            app.MapAuthServer("/sqlos/auth");
             await app.StartAsync();
 
             var anonymousClient = app.GetTestClient();
