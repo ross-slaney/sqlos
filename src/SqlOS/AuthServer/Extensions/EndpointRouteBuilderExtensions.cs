@@ -10,7 +10,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -28,21 +27,9 @@ public static partial class EndpointRouteBuilderExtensions
 {
     private const int MaxScimPayloadBytes = 256 * 1024;
 
-    public static IEndpointRouteBuilder MapAuthServer(this IEndpointRouteBuilder endpoints, string? pathPrefix = null)
+    internal static IEndpointRouteBuilder MapSqlOSAuthServerEndpoints(this IEndpointRouteBuilder endpoints, string? pathPrefix = null)
     {
         var authPrefix = (pathPrefix ?? "/sqlos/auth").TrimEnd('/');
-        var mappingState = endpoints.ServiceProvider.GetService<Hosting.SqlOSEndpointMappingState>();
-        if (mappingState is { OwnedMappingInProgress: false } && mappingState.MarkMappedByApplication())
-        {
-            // Application code mapped the auth server itself; the SqlOS-owned data source withdraws
-            // its copy of these routes so nothing is registered twice.
-            endpoints.ServiceProvider.GetService<ILoggerFactory>()?
-                .CreateLogger("SqlOS.Hosting")
-                .LogWarning(
-                    "AddSqlOS maps the SqlOS endpoints at startup. Remove the manual MapAuthServer() call. " +
-                    "It remains safe and idempotent, and no route was registered twice.");
-        }
-
         var authOptions = endpoints.ServiceProvider.GetService<IOptions<SqlOSAuthServerOptions>>()?.Value
             ?? new SqlOSAuthServerOptions();
         var adminPrefix = authPrefix.EndsWith("/auth", StringComparison.OrdinalIgnoreCase)

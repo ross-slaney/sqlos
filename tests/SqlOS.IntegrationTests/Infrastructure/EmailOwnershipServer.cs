@@ -24,7 +24,7 @@ using SqlOS.Services;
 namespace SqlOS.IntegrationTests.Infrastructure;
 
 /// <summary>
-/// A real SqlOS host (AddSqlOS + MapAuthServer) on an isolated SQL database with password,
+/// A real SqlOS host (AddSqlOS) on an isolated SQL database with password,
 /// email-code, and magic-link sign-in enabled, SCIM on, a first-party browser client, a
 /// capturing email sender, and the fake upstream OIDC provider. Email-ownership tests drive
 /// the production services and routes through it so every assertion crosses a real SQL boundary.
@@ -90,10 +90,8 @@ internal sealed class EmailOwnershipServer : IAsyncDisposable
         builder.Services.RemoveAll<IHttpClientFactory>();
         builder.Services.AddSingleton<IHttpClientFactory>(new FakeOidcProviderHttpClientFactory());
         builder.Services.RemoveAll<IHostedService>();
-        builder.Services.RemoveAll<IStartupFilter>();
 
         var app = builder.Build();
-        app.MapAuthServer("/sqlos/auth");
         await using (var scope = app.Services.CreateAsyncScope())
         {
             await scope.ServiceProvider.GetRequiredService<SqlOSBootstrapper>().InitializeAsync();

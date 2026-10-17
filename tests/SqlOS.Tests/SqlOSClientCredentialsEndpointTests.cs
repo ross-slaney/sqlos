@@ -133,7 +133,6 @@ public sealed class SqlOSClientCredentialsEndpointTests
                 .Configure(app =>
                 {
                     app.UseRouting();
-                    app.UseEndpoints(endpoints => endpoints.MapAuthServer("/sqlos/auth"));
                 }))
             .StartAsync();
     }

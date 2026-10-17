@@ -18,7 +18,7 @@ public static class EndpointRouteBuilderExtensions
     /// (<c>{authBasePath}/calendar/callback</c>). The connect flow itself is started
     /// server-side through <see cref="SqlOSCalendarService.StartConnectAsync"/>.
     /// </summary>
-    public static IEndpointRouteBuilder MapSqlOSCalendarConnect(
+    internal static IEndpointRouteBuilder MapSqlOSCalendarConnect(
         this IEndpointRouteBuilder endpoints,
         string authBasePath)
     {
@@ -38,7 +38,7 @@ public static class EndpointRouteBuilderExtensions
     /// Maps the calendar admin API under <c>{dashboardBasePath}/admin/calendar/api</c>,
     /// guarded by the same dashboard session rules as the other admin surfaces.
     /// </summary>
-    public static IEndpointRouteBuilder MapSqlOSCalendarAdmin(
+    internal static IEndpointRouteBuilder MapSqlOSCalendarAdmin(
         this IEndpointRouteBuilder endpoints,
         string dashboardBasePath)
     {

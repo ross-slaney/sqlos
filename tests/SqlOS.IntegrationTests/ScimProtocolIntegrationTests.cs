@@ -812,9 +812,7 @@ public sealed partial class ScimProtocolIntegrationTests
                 options.AuthServer.ScimBasePath = "/sqlos/scim/v2";
             });
             builder.Services.RemoveAll<IHostedService>();
-            builder.Services.RemoveAll<IStartupFilter>();
             var app = builder.Build();
-            app.MapAuthServer("/sqlos/auth");
             await app.StartAsync();
 
             var client = app.GetTestClient();

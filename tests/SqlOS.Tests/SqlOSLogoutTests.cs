@@ -436,7 +436,6 @@ public sealed class SqlOSLogoutTests
                 .Configure(app =>
                 {
                     app.UseRouting();
-                    app.UseEndpoints(endpoints => endpoints.MapAuthServer("/sqlos/auth"));
                 }))
             .StartAsync();
 
