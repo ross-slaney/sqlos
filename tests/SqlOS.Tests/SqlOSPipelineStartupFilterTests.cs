@@ -6,6 +6,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -225,6 +226,81 @@ public sealed class SqlOSPipelineStartupFilterTests
         (await host.Client.GetAsync("/sqlos")).StatusCode.Should().NotBe(HttpStatusCode.NotFound, "the dashboard middleware serves the operator UI in Development");
         (await host.Client.GetStringAsync("/hello")).Should().Be("app", "unmatched requests fall through to the application's pipeline");
         host.Logs.Entries.Should().NotContain(entry => entry.Message.Contains("MapAuthServer()", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task LeftoverMapAuthServer_MatchesDefaultRoutesAndWarnsOnce()
+    {
+        await using var baseline = await StartWiringHostAsync(mapAuthServer: false);
+        await using var legacy = await StartWiringHostAsync(mapAuthServer: true);
+
+        var baselineRoutes = RouteInventory(baseline.App);
+        var legacyRoutes = RouteInventory(legacy.App);
+
+        legacyRoutes.Should().Equal(baselineRoutes, "a leftover MapAuthServer() call withdraws only the duplicate auth-server routes");
+        legacyRoutes.GroupBy(route => route, StringComparer.Ordinal).Should().OnlyContain(group => group.Count() == 1);
+        legacyRoutes.Should().Contain("GET /sqlos/admin/audit/api/events");
+        legacyRoutes.Should().Contain("GET /sqlos/admin/email/api/templates");
+        legacyRoutes.Should().Contain("GET /sqlos/admin/calendar/api/summary");
+        legacyRoutes.Should().Contain("GET /sqlos/auth/calendar/callback");
+        legacyRoutes.Should().Contain("GET /sqlos/auth/.well-known/openid-configuration");
+
+        MapAuthServerWarnings(baseline).Should().BeEmpty();
+        MapAuthServerWarnings(legacy).Should().ContainSingle();
+
+        foreach (var path in new[]
+        {
+            "/sqlos/admin/audit/api/events",
+            "/sqlos/admin/email/api/templates",
+            "/sqlos/admin/calendar/api/summary",
+            "/sqlos/auth/calendar/callback"
+        })
+        {
+            await AssertMappedAsync(baseline.Client, path);
+            await AssertMappedAsync(legacy.Client, path);
+        }
+
+        (await legacy.Client.GetAsync("/sqlos/auth/.well-known/openid-configuration")).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await legacy.Client.GetStringAsync("/hello")).Should().Be("app");
+    }
+
+    private static Task<SingleApplicationTestHost> StartWiringHostAsync(bool mapAuthServer)
+        => SingleApplicationTestHost.StartAsync(
+            options => options.UseSingleApplication("Todo", app => app.Origin = SingleApplicationTestHost.Origin),
+            app =>
+            {
+                app.MapGet("/hello", () => "app");
+                app.MapFallback(() => Results.Text("fell-through"));
+                if (mapAuthServer)
+                {
+                    app.MapAuthServer();
+                }
+            });
+
+    private static IReadOnlyList<string> RouteInventory(WebApplication app)
+        => app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .SelectMany(endpoint =>
+            {
+                var methods = endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods;
+                return (methods is { Count: > 0 } ? methods : ["*"])
+                    .Select(method => $"{method} {endpoint.RoutePattern.RawText}");
+            })
+            .OrderBy(route => route, StringComparer.Ordinal)
+            .ToArray();
+
+    private static IReadOnlyList<string> MapAuthServerWarnings(SingleApplicationTestHost host)
+        => host.Logs.Entries
+            .Where(entry => entry.Level == LogLevel.Warning
+                && entry.Message.Contains("MapAuthServer()", StringComparison.Ordinal))
+            .Select(entry => entry.Message)
+            .ToArray();
+
+    private static async Task AssertMappedAsync(HttpClient client, string path)
+    {
+        var response = await client.GetAsync(path);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotBe("fell-through", $"{path} is a SqlOS route, not the host fallback");
     }
 
     [TestMethod]

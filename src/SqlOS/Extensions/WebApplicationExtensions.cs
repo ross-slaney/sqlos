@@ -14,20 +14,23 @@ namespace SqlOS.Extensions;
 public static class WebApplicationExtensions
 {
     /// <summary>
-    /// Maps the auth-server, admin, email, and calendar endpoints under the SqlOS-owned prefixes.
+    /// Maps the auth server on <paramref name="authEndpoints"/> and the audit, email, and calendar
+    /// endpoints on <paramref name="moduleEndpoints"/>. The two builders stay separate so a leftover
+    /// <c>MapAuthServer()</c> call can withdraw only the auth-server copy.
     /// </summary>
     internal static void MapSqlOSCoreEndpoints(
-        IEndpointRouteBuilder endpoints,
+        IEndpointRouteBuilder authEndpoints,
+        IEndpointRouteBuilder moduleEndpoints,
         SqlOSOptions sqlosOptions,
         SqlOSAuthServerOptions authOptions)
     {
-        endpoints.MapAuthServer(authOptions.BasePath);
-        endpoints.MapSqlOSAuditLogsAdmin(sqlosOptions.DashboardBasePath);
-        endpoints.MapSqlOSEmailAdmin(sqlosOptions.DashboardBasePath);
+        authEndpoints.MapAuthServer(authOptions.BasePath);
+        moduleEndpoints.MapSqlOSAuditLogsAdmin(sqlosOptions.DashboardBasePath);
+        moduleEndpoints.MapSqlOSEmailAdmin(sqlosOptions.DashboardBasePath);
         if (sqlosOptions.Calendar.Enabled)
         {
-            endpoints.MapSqlOSCalendarConnect(authOptions.BasePath);
-            endpoints.MapSqlOSCalendarAdmin(sqlosOptions.DashboardBasePath);
+            moduleEndpoints.MapSqlOSCalendarConnect(authOptions.BasePath);
+            moduleEndpoints.MapSqlOSCalendarAdmin(sqlosOptions.DashboardBasePath);
         }
     }
 }

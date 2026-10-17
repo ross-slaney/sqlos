@@ -5,24 +5,27 @@ using Microsoft.Extensions.Primitives;
 namespace SqlOS.Hosting;
 
 /// <summary>
-/// The endpoints SqlOS maps on the application's behalf. The auth-server/admin routes are withheld
+/// The endpoints SqlOS maps on the application's behalf. Only the auth-server routes are withheld
 /// while <see cref="SqlOSEndpointMappingState.MappedByApplication"/> is set, so an obsolete
-/// manual <c>MapAuthServer()</c> call anywhere in application startup never
-/// produces duplicate routes, whether it runs before or after the SqlOS startup filter.
+/// manual <c>MapAuthServer()</c> call never registers those routes twice. Audit, email, and
+/// calendar routes stay mapped, whether the call runs before or after the SqlOS startup filter.
 /// </summary>
 internal sealed class SqlOSEndpointDataSource : EndpointDataSource
 {
     private readonly SqlOSEndpointMappingState _state;
-    private readonly IReadOnlyList<EndpointDataSource> _core;
+    private readonly IReadOnlyList<EndpointDataSource> _authServer;
+    private readonly IReadOnlyList<EndpointDataSource> _modules;
     private readonly IReadOnlyList<EndpointDataSource> _shared;
 
     public SqlOSEndpointDataSource(
         SqlOSEndpointMappingState state,
-        IReadOnlyList<EndpointDataSource> core,
+        IReadOnlyList<EndpointDataSource> authServer,
+        IReadOnlyList<EndpointDataSource> modules,
         IReadOnlyList<EndpointDataSource> shared)
     {
         _state = state;
-        _core = core;
+        _authServer = authServer;
+        _modules = modules;
         _shared = shared;
     }
 
@@ -30,14 +33,19 @@ internal sealed class SqlOSEndpointDataSource : EndpointDataSource
     {
         get
         {
-            var sources = _state.MappedByApplication ? _shared : _core.Concat(_shared);
+            IEnumerable<EndpointDataSource> sources = _modules.Concat(_shared);
+            if (!_state.MappedByApplication)
+            {
+                sources = _authServer.Concat(sources);
+            }
+
             return sources.SelectMany(source => source.Endpoints).ToArray();
         }
     }
 
     public override IChangeToken GetChangeToken()
         => new CompositeChangeToken(
-            _core.Concat(_shared).Select(source => source.GetChangeToken())
+            _authServer.Concat(_modules).Concat(_shared).Select(source => source.GetChangeToken())
                 .Append(_state.GetChangeToken())
                 .ToArray());
 }

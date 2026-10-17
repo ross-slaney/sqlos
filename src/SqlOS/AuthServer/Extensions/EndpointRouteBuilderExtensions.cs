@@ -35,7 +35,8 @@ public static partial class EndpointRouteBuilderExtensions
         if (mappingState is { OwnedMappingInProgress: false } && mappingState.MarkMappedByApplication())
         {
             // Application code mapped the auth server itself; the SqlOS-owned data source withdraws
-            // its copy of these routes so nothing is registered twice.
+            // its copy of these auth-server routes so nothing is registered twice. Audit, email,
+            // and calendar routes stay on the SqlOS-owned data source.
             endpoints.ServiceProvider.GetService<ILoggerFactory>()?
                 .CreateLogger("SqlOS.Hosting")
                 .LogWarning(

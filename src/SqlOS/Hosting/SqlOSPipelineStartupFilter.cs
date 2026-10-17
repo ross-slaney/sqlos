@@ -94,16 +94,21 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
             return;
         }
 
-        // Map the auth-server/admin routes into a SqlOS-owned data source. It withholds them at
-        // dispatch time when application code also called MapAuthServer(),
-        // whether that call runs before or after this filter, so no route is ever registered twice.
+        // Map auth-server routes separately from audit, email, and calendar. The data source
+        // withholds only the auth-server copy when application code also called MapAuthServer(),
+        // whether that call runs before or after this filter.
         var application = hostOptions.AuthServer.Application;
         var hostExtensions = application?.HostExtensions ?? [];
-        var coreEndpoints = new SqlOSEndpointRouteBuilder(services);
+        var authEndpoints = new SqlOSEndpointRouteBuilder(services);
+        var moduleEndpoints = new SqlOSEndpointRouteBuilder(services);
         mappingState.OwnedMappingInProgress = true;
         try
         {
-            WebApplicationExtensions.MapSqlOSCoreEndpoints(coreEndpoints, hostOptions, hostOptions.AuthServer);
+            WebApplicationExtensions.MapSqlOSCoreEndpoints(
+                authEndpoints,
+                moduleEndpoints,
+                hostOptions,
+                hostOptions.AuthServer);
         }
         finally
         {
@@ -119,7 +124,8 @@ internal sealed class SqlOSPipelineStartupFilter : IStartupFilter
 
         var sqlosEndpoints = new SqlOSEndpointDataSource(
             mappingState,
-            coreEndpoints.DataSources.ToArray(),
+            authEndpoints.DataSources.ToArray(),
+            moduleEndpoints.DataSources.ToArray(),
             sharedEndpoints.DataSources.ToArray());
 
         // Let the application configure its pipeline first. WebApplication wraps it in

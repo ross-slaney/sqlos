@@ -3,8 +3,8 @@ using Microsoft.Extensions.Primitives;
 namespace SqlOS.Hosting;
 
 /// <summary>
-/// Records which host mapped the SqlOS auth-server and admin endpoints so the startup filter and
-/// a manual <c>MapAuthServer()</c> call never registers the same routes twice.
+/// Records when application code mapped the auth server, so the startup filter can withdraw only
+/// that copy and a manual <c>MapAuthServer()</c> call never registers those routes twice.
 /// </summary>
 internal sealed class SqlOSEndpointMappingState
 {
@@ -14,8 +14,9 @@ internal sealed class SqlOSEndpointMappingState
 
     /// <summary>
     /// <see langword="true"/> once application code called <c>MapAuthServer()</c>.
-    /// The SqlOS-owned <see cref="SqlOSEndpointDataSource"/> then withdraws its copy of those routes
-    /// (it decides lazily, so the application call may happen before or after the startup filter).
+    /// The SqlOS-owned <see cref="SqlOSEndpointDataSource"/> then withdraws its auth-server routes
+    /// and keeps the audit, email, and calendar routes. It decides lazily, so the application call
+    /// may happen before or after the startup filter.
     /// </summary>
     public bool MappedByApplication
     {
