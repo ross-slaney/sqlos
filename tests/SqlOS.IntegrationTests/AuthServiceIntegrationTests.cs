@@ -426,6 +426,131 @@ public sealed class AuthServiceIntegrationTests
     }
 
     [TestMethod]
+    public async Task SsoOrganizationRevocation_UnverifiedDomainAddress_RevokesSessionAndLeavesOtherDomains()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var domain = $"{suffix}.unverified-signout.test";
+        string portalSessionId;
+        string unverifiedSessionId;
+        string otherSessionId;
+        string clientAudience;
+        string organizationId;
+        SqlOSTokenResponse unverifiedTokens;
+        SqlOSTokenResponse otherTokens;
+
+        await using (var issuance = BuildIsolatedLifecycleStack())
+        {
+            var organization = await issuance.Admin.CreateOrganizationAsync(
+                new SqlOSCreateOrganizationRequest($"Unverified Signout {suffix}", null));
+            organizationId = organization.Id;
+            var portalResult = await issuance.Portal.CreateSessionAsync(
+                new SqlOSCreateSsoPortalSessionRequest(organization.Id),
+                new DefaultHttpContext());
+            portalSessionId = portalResult.Id;
+            var connection = await issuance.Context.Set<SqlOSSsoConnection>()
+                .SingleAsync(x => x.OrganizationId == organization.Id);
+            connection.IsEnabled = true;
+            connection.IdentityProviderEntityId = $"urn:unverified-signout:{suffix}";
+            connection.SingleSignOnUrl = "https://idp.unverified-signout.test/sso";
+            connection.X509CertificatePem = "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----";
+            issuance.Context.Set<SqlOSOrganizationDomain>().Add(new SqlOSOrganizationDomain
+            {
+                Id = issuance.Crypto.GenerateId("dom"),
+                OrganizationId = organization.Id,
+                Domain = domain,
+                Status = SqlOSOrganizationDomainStatuses.Active,
+                VerificationToken = "verified",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                VerifiedAt = DateTime.UtcNow
+            });
+
+            var unverifiedUser = await issuance.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+                "Unverified Domain User",
+                $"pending@{domain}",
+                "P@ssword123!"));
+            var otherUser = await issuance.Admin.CreateUserAsync(new SqlOSCreateUserRequest(
+                "Other Domain User",
+                $"other@{suffix}.other-signout.test",
+                "P@ssword123!"));
+            (await issuance.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == unverifiedUser.Id))
+                .IsVerified.Should().BeFalse();
+            (await issuance.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == otherUser.Id))
+                .IsVerified.Should().BeFalse();
+
+            await issuance.Admin.CreateMembershipAsync(
+                organization.Id,
+                new SqlOSCreateMembershipRequest(unverifiedUser.Id, "member"));
+            await issuance.Admin.CreateMembershipAsync(
+                organization.Id,
+                new SqlOSCreateMembershipRequest(otherUser.Id, "member"));
+            var client = await issuance.Context.Set<SqlOSClientApplication>()
+                .SingleAsync(x => x.ClientId == "test-client");
+            clientAudience = client.Audience;
+
+            unverifiedTokens = await issuance.Auth.CreateSessionTokensForUserAsync(
+                unverifiedUser,
+                client,
+                organization.Id,
+                "password",
+                "SQL unverified sign-out",
+                "203.0.113.60");
+            unverifiedSessionId = unverifiedTokens.SessionId;
+            otherTokens = await issuance.Auth.CreateSessionTokensForUserAsync(
+                otherUser,
+                client,
+                organization.Id,
+                "password",
+                "SQL unverified sign-out",
+                "203.0.113.61");
+            otherSessionId = otherTokens.SessionId;
+            await issuance.Context.SaveChangesAsync();
+        }
+
+        await using (var revocation = BuildIsolatedLifecycleStack())
+        {
+            var portalSession = await revocation.Context.Set<SqlOSSsoPortalSession>()
+                .SingleAsync(x => x.Id == portalSessionId);
+            var result = await revocation.Portal.RevokeOrganizationSessionsAsync(
+                portalSession,
+                new SqlOSSsoPortalRevokeOrganizationSessionsRequest(true),
+                new DefaultHttpContext());
+
+            result.OrganizationId.Should().Be(organizationId);
+            result.Domain.Should().Be(domain);
+            result.RevokedSessions.Should().Be(1);
+            var revoked = await revocation.Context.Set<SqlOSSession>()
+                .SingleAsync(x => x.Id == unverifiedSessionId);
+            revoked.RevokedAt.Should().NotBeNull();
+            revoked.RevocationReason.Should().Be("sso_required");
+            (await revocation.Context.Set<SqlOSRefreshToken>()
+                .Where(x => x.SessionId == unverifiedSessionId)
+                .AllAsync(x => x.RevokedAt != null)).Should().BeTrue();
+            (await revocation.Context.Set<SqlOSSession>()
+                .SingleAsync(x => x.Id == otherSessionId)).RevokedAt.Should().BeNull();
+            (await revocation.Context.Set<SqlOSUserEmail>()
+                .SingleAsync(x => x.NormalizedEmail == $"PENDING@{domain.ToUpperInvariant()}"))
+                .IsVerified.Should().BeFalse();
+        }
+
+        await using var verification = BuildIsolatedLifecycleStack();
+        (await verification.Auth.ValidateAccessTokenAsync(
+            unverifiedTokens.AccessToken,
+            clientAudience)).Should().BeNull();
+        var unverifiedRefresh = async () => await verification.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(unverifiedTokens.RefreshToken, organizationId));
+        await unverifiedRefresh.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Refresh token is no longer valid.");
+
+        (await verification.Auth.ValidateAccessTokenAsync(
+            otherTokens.AccessToken,
+            clientAudience)).Should().NotBeNull();
+        var otherRefresh = await verification.Auth.RefreshAsync(
+            new SqlOSRefreshRequest(otherTokens.RefreshToken, organizationId));
+        otherRefresh.OrganizationId.Should().Be(organizationId);
+    }
+
+    [TestMethod]
     public async Task OrganizationDeactivation_SerializesAgainstStalePortalMutationAcrossDbContexts()
     {
         var suffix = Guid.NewGuid().ToString("N");

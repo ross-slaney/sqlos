@@ -208,7 +208,7 @@ A SAML connection only signs users into its own organization. The ACS resolves, 
 
 JIT provisioning never reactivates an existing inactive membership, and SAML callbacks reject inactive users and inactive organizations. This preserves offboarding even when the IdP still sends a valid assertion for a previously linked subject. Re-enable the user or membership through an explicit trusted workflow before allowing another SAML login.
 
-Activation only enables the SSO connection and HRD behavior. It does not revoke active sessions. Use the separate session revocation action when an admin intentionally wants existing matching-domain sessions to sign in again through SSO. That action invalidates matching-domain OAuth and issuer sessions for the organization.
+Activation only enables the SSO connection and HRD behavior. It does not revoke active sessions. Use the separate session revocation action when an admin intentionally wants existing sessions at the verified domain to sign in again through SSO. That action invalidates OAuth and issuer sessions for every account with an address at that domain, whether or not the address itself is verified.
 
 ## Headless setup state machine
 

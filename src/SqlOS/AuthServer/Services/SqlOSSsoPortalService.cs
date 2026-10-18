@@ -701,9 +701,11 @@ public sealed class SqlOSSsoPortalService
         var normalizedDomainSuffix = "@" + domain.Domain.ToUpperInvariant();
         // SQL narrows candidates by key suffix; the domain is confirmed in code so a collation
         // that equates look-alike domains cannot sign out another domain's users.
+        // The organization's domain is already verified. An unverified mailbox at that domain
+        // is still signed out, otherwise turning on SSO leaves those sessions in place.
         var eligibleUserIds = (await _context.Set<SqlOSUserEmail>()
                 .AsNoTracking()
-                .Where(x => x.IsVerified && x.NormalizedEmail.EndsWith(normalizedDomainSuffix))
+                .Where(x => x.NormalizedEmail.EndsWith(normalizedDomainSuffix))
                 .Select(x => new { x.UserId, x.Email })
                 .ToListAsync(cancellationToken))
             .Where(x => SqlOSEmailAddress.TryNormalize(x.Email, out var key)
