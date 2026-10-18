@@ -613,9 +613,14 @@ public sealed class SqlOSSsoPortalServiceTests
         });
 
         var matching = await CreateVerifiedUserAsync(harness, "Matching User", "member@revoke.test");
+        var unverified = await harness.Admin.CreateUserAsync(
+            new SqlOSCreateUserRequest("Unverified User", "pending@revoke.test", "P@ssword123!"));
+        (await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == unverified.Id))
+            .IsVerified.Should().BeFalse();
         var unrelatedDomain = await CreateVerifiedUserAsync(harness, "Other Domain User", "member@else.test");
         var otherOrganizationUser = await CreateVerifiedUserAsync(harness, "Other Org User", "other@revoke.test");
         AddSession(harness, "sess_revoke_match", matching.Id, org.Id);
+        AddSession(harness, "sess_revoke_unverified", unverified.Id, org.Id);
         AddSession(harness, "sess_revoke_domain_miss", unrelatedDomain.Id, org.Id);
         AddSession(harness, "sess_revoke_other_org", otherOrganizationUser.Id, otherOrg.Id);
         await harness.Context.SaveChangesAsync();
@@ -625,6 +630,13 @@ public sealed class SqlOSSsoPortalServiceTests
             clientApplicationId: null,
             organizationId: org.Id,
             payload: new { AuthenticationMethod = "saml" },
+            lifetime: TimeSpan.FromHours(1));
+        var unverifiedAuthPage = await harness.Crypto.CreateTemporaryTokenAsync(
+            "auth_page_session",
+            unverified.Id,
+            clientApplicationId: null,
+            organizationId: org.Id,
+            payload: new { AuthenticationMethod = "password" },
             lifetime: TimeSpan.FromHours(1));
         var unrelatedAuthPage = await harness.Crypto.CreateTemporaryTokenAsync(
             "auth_page_session",
@@ -656,12 +668,17 @@ public sealed class SqlOSSsoPortalServiceTests
         result.OrganizationId.Should().Be(org.Id);
         result.ConnectionId.Should().Be(connection.Id);
         result.Domain.Should().Be("revoke.test");
-        result.RevokedSessions.Should().Be(1);
+        result.RevokedSessions.Should().Be(2);
 
         var matchingSession = await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_revoke_match");
         matchingSession.RevokedAt.Should().NotBeNull();
         matchingSession.RevocationReason.Should().Be("sso_required");
         (await harness.Context.Set<SqlOSRefreshToken>().SingleAsync(x => x.SessionId == matchingSession.Id)).RevokedAt
+            .Should().NotBeNull();
+        var unverifiedSession = await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_revoke_unverified");
+        unverifiedSession.RevokedAt.Should().NotBeNull();
+        unverifiedSession.RevocationReason.Should().Be("sso_required");
+        (await harness.Context.Set<SqlOSRefreshToken>().SingleAsync(x => x.SessionId == unverifiedSession.Id)).RevokedAt
             .Should().NotBeNull();
 
         (await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_revoke_domain_miss")).RevokedAt
@@ -669,13 +686,14 @@ public sealed class SqlOSSsoPortalServiceTests
         (await harness.Context.Set<SqlOSSession>().SingleAsync(x => x.Id == "sess_revoke_other_org")).RevokedAt
             .Should().BeNull();
         (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", matchingAuthPage)).Should().BeNull();
+        (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", unverifiedAuthPage)).Should().BeNull();
         (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", unrelatedAuthPage)).Should().NotBeNull();
         (await harness.Crypto.FindTemporaryTokenAsync("auth_page_session", otherOrgAuthPage)).Should().NotBeNull();
         (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "sso.portal.organization_sessions.revoked"
             && x.OrganizationId == org.Id
             && x.MetadataJson != null
-            && x.MetadataJson.Contains("\"revokedSessions\":1", StringComparison.Ordinal)
-            && x.MetadataJson.Contains("\"invalidatedAuthPageSessions\":1", StringComparison.Ordinal)))
+            && x.MetadataJson.Contains("\"revokedSessions\":2", StringComparison.Ordinal)
+            && x.MetadataJson.Contains("\"invalidatedAuthPageSessions\":2", StringComparison.Ordinal)))
             .Should().BeTrue();
     }
 
