@@ -21,7 +21,8 @@ internal static class SqlOSDirectLoginPolicy
     /// <summary>
     /// Returns when <paramref name="client"/> is first-party. Otherwise records one
     /// <see cref="RejectedAuditEvent"/> and throws the generic public <c>invalid_client</c> error.
-    /// Callers run this before minting any token, challenge, email, provider state, or session.
+    /// Callers run this before minting any token, challenge, email, provider state, or session,
+    /// and before a direct-login email-code verify consumes the code or claims the address.
     /// </summary>
     public static async Task EnsureFirstPartyAsync(
         SqlOSAdminService adminService,

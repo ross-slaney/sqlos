@@ -189,6 +189,56 @@ public sealed class SqlOSDirectLoginFirstPartyTests
         (await harness.RejectionsAsync()).Should().HaveCount(2);
     }
 
+    [TestMethod]
+    public async Task EmailOtpVerify_ThirdPartyClient_RefusesBeforeTheCodeIsConsumedOrTheAddressClaimed()
+    {
+        using var harness = await Harness.CreateAsync();
+        var http = Harness.CreateHttpContext("/sqlos/auth/email-otp/verify");
+        const string email = "otp-victim@example.com";
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Victim", email, Password));
+        var established = await harness.Auth.LoginWithPasswordAsync(
+            new SqlOSPasswordLoginRequest(email, Password, FirstPartyClientId, null),
+            http);
+        established.Tokens.Should().NotBeNull();
+
+        await harness.SetThirdPartyIsFirstPartyAsync(true);
+        var started = await harness.Auth.RequestEmailOtpAsync(
+            new SqlOSEmailOtpStartRequest(email, ThirdPartyClientId, null),
+            http);
+        await harness.SetThirdPartyIsFirstPartyAsync(false);
+        var code = harness.LatestCode(email);
+
+        var rejected = async () => await harness.Auth.VerifyEmailOtpAsync(
+            new SqlOSEmailOtpVerifyRequest(started.ChallengeToken, code),
+            http);
+
+        var error = (await rejected.Should().ThrowAsync<SqlOSPublicAuthException>()).Which;
+        error.Error.Should().Be("invalid_client");
+        var challenge = await harness.Context.Set<SqlOSEmailOtpChallenge>().SingleAsync();
+        challenge.ConsumedAt.Should().BeNull();
+        challenge.InvalidatedAt.Should().BeNull();
+        challenge.AttemptCount.Should().Be(0);
+        (await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == user.Id)).IsVerified.Should().BeFalse();
+        (await harness.Context.Set<SqlOSCredential>().CountAsync(x => x.UserId == user.Id && x.RevokedAt != null)).Should().Be(0);
+        (await harness.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == user.Id && x.RevokedAt != null)).Should().Be(0);
+        (await harness.Context.Set<SqlOSRefreshToken>().CountAsync(x => x.RevokedAt != null)).Should().Be(0);
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == SqlOSEmailOwnershipClaim.AuditEventType)).Should().Be(0);
+        var rejection = (await harness.RejectionsAsync()).Should().ContainSingle().Subject;
+        rejection.UserId.Should().Be(user.Id);
+        ReadMetadata(rejection, "route").Should().Be("/sqlos/auth/email-otp/verify");
+
+        // The same code still proves the mailbox once the client is first-party, and that proof is what claims it.
+        await harness.SetThirdPartyIsFirstPartyAsync(true);
+        var accepted = await harness.Auth.VerifyEmailOtpAsync(
+            new SqlOSEmailOtpVerifyRequest(started.ChallengeToken, code),
+            http);
+        accepted.Tokens.Should().NotBeNull();
+        (await harness.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.UserId == user.Id)).IsVerified.Should().BeTrue();
+        (await harness.Context.Set<SqlOSCredential>().CountAsync(x => x.UserId == user.Id && x.RevokedAt != null)).Should().Be(1);
+        (await harness.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == SqlOSEmailOwnershipClaim.AuditEventType && x.UserId == user.Id))
+            .Should().Be(1);
+    }
+
     private static string? ReadMetadata(SqlOSAuditEvent auditEvent, string property)
     {
         using var metadata = JsonDocument.Parse(auditEvent.MetadataJson ?? "{}");
