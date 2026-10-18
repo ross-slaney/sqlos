@@ -211,7 +211,6 @@ public sealed class PublicOriginSecurityIntegrationTests
             builder.Services.AddSingleton<ISqlOSEmailSender>(emailSender);
 
             var app = builder.Build();
-            app.MapAuthServer("/sqlos/auth");
             await using (var scope = app.Services.CreateAsyncScope())
             {
                 await scope.ServiceProvider.GetRequiredService<SqlOSBootstrapper>().InitializeAsync();

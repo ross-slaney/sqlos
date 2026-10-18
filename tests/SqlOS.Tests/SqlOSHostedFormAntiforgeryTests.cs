@@ -214,7 +214,6 @@ public sealed class SqlOSHostedFormAntiforgeryTests
         builder.Services.RemoveAll<IHostedService>();
 
         var app = builder.Build();
-        app.MapAuthServer("/sqlos/auth");
         await app.StartAsync();
         return app;
     }

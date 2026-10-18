@@ -187,7 +187,7 @@ Describes the host independently of client registration. `SqlOSApplicationOption
 
 `AddSqlOS` registers an `IStartupFilter` that maps the AuthServer routes, audit-log admin routes, transactional-email admin routes, calendar routes (when `SqlOSOptions.Calendar.Enabled` is `true`), and the protected-resource documents for declared surfaces. They join the application's own route table, so the application's middleware (CORS, exception handling, rate limiting) runs in front of them and normal route precedence applies. The MCP transport is the host's `AddMcpServer` / `MapMcp` calls.
 
-A leftover `MapAuthServer()` call is safe and idempotent: SqlOS withdraws its own copy of those routes and logs one warning. Remove the call.
+There is no host mapping call. `AddSqlOS` maps those routes. Delete a leftover `MapAuthServer()` from older wiring.
 
 ## GetSqlOSValidatedToken
 

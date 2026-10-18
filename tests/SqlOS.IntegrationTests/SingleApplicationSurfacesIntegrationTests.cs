@@ -201,7 +201,6 @@ public sealed class SingleApplicationSurfacesIntegrationTests
                 }).RequireAuthorization();
                 app.MapMcp("/mcp").RequireAuthorization(SqlOSJwtDefaults.McpPolicy);
             },
-            mapAuthServer: false,
             seedBrowserClient: false);
 
     private static async Task<JsonDocument> AuthorizeFirstPartyAsync(HostedAuthorizeTokenFixture fixture, string scope)

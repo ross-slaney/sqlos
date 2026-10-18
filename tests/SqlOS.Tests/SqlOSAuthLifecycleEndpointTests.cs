@@ -131,7 +131,6 @@ public sealed class SqlOSAuthLifecycleEndpointTests
                 .Configure(app =>
                 {
                     app.UseRouting();
-                    app.UseEndpoints(endpoints => endpoints.MapAuthServer("/sqlos/auth"));
                 }))
             .StartAsync();
     }

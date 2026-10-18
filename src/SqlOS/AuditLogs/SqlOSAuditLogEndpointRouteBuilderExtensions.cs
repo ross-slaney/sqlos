@@ -14,7 +14,7 @@ namespace SqlOS.AuditLogs;
 
 public static class SqlOSAuditLogEndpointRouteBuilderExtensions
 {
-    public static IEndpointRouteBuilder MapSqlOSAuditLogsAdmin(
+    internal static IEndpointRouteBuilder MapSqlOSAuditLogsAdmin(
         this IEndpointRouteBuilder endpoints,
         string dashboardBasePath)
     {

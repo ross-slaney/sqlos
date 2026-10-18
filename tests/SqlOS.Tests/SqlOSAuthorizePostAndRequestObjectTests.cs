@@ -190,7 +190,6 @@ public sealed class SqlOSAuthorizePostAndRequestObjectTests
                     .Configure(app =>
                     {
                         app.UseRouting();
-                        app.UseEndpoints(endpoints => endpoints.MapAuthServer("/sqlos/auth"));
                     }))
                 .StartAsync();
 

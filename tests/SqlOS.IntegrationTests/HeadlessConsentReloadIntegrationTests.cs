@@ -409,7 +409,6 @@ public sealed class HeadlessConsentReloadIntegrationTests
             builder.Services.RemoveAll<IHostedService>();
 
             var app = builder.Build();
-            app.MapAuthServer("/sqlos/auth");
             await using (var scope = app.Services.CreateAsyncScope())
             {
                 await scope.ServiceProvider.GetRequiredService<SqlOSBootstrapper>().InitializeAsync();
