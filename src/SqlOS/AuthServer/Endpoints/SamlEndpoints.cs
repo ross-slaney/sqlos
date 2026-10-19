@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,15 @@ namespace SqlOS.AuthServer.Extensions;
 
 public static partial class EndpointRouteBuilderExtensions
 {
+    // Twice the encoded SAMLResponse cap leaves room for form encoding and RelayState.
+    private const int MaxSamlAcsFormBytes = 2 * SqlOSSamlService.MaxEncodedSamlResponseLength;
+    private static readonly FormOptions SamlAcsFormOptions = new()
+    {
+        ValueLengthLimit = MaxSamlAcsFormBytes,
+        ValueCountLimit = 8,
+        MultipartBodyLengthLimit = MaxSamlAcsFormBytes
+    };
+
     private static void MapSamlEndpoints(RouteGroupBuilder auth)
     {
         auth.MapPost("/sso/authorization-url", async (SqlOSAuthorizationUrlRequest request, SqlOSSamlService samlService, CancellationToken cancellationToken) =>
@@ -53,7 +63,25 @@ public static partial class EndpointRouteBuilderExtensions
             SqlOSHeadlessAuthService headlessAuthService,
             CancellationToken cancellationToken)
         {
-            var form = await httpContext.Request.ReadFormAsync(cancellationToken);
+            IFormCollection form;
+            try
+            {
+                form = await ReadSamlAcsFormAsync(httpContext.Request, cancellationToken);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or BadHttpRequestException or InvalidOperationException)
+            {
+                var error = await MapPublicAuthErrorAsync(
+                    httpContext,
+                    ex,
+                    SqlOSPublicAuthErrorSurface.SamlAcs,
+                    cancellationToken);
+                return Results.Json(new
+                {
+                    error = error.Error,
+                    message = error.PublicMessage
+                }, statusCode: StatusCodes.Status400BadRequest);
+            }
+
             var samlResponse = form["SAMLResponse"].ToString();
             var relayState = form["RelayState"].ToString();
             if (string.IsNullOrWhiteSpace(samlResponse) || string.IsNullOrWhiteSpace(relayState))
@@ -96,5 +124,22 @@ public static partial class EndpointRouteBuilderExtensions
         }
 
         auth.MapPost("/saml/acs/{connectionId}", HandleSamlAcsAsync);
+    }
+
+    private static Task<IFormCollection> ReadSamlAcsFormAsync(HttpRequest request, CancellationToken cancellationToken)
+    {
+        if (request.ContentLength > MaxSamlAcsFormBytes)
+        {
+            throw new InvalidDataException("SAML ACS form exceeds the request size limit.");
+        }
+
+        var bodySize = request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (bodySize is { IsReadOnly: false }
+            && (bodySize.MaxRequestBodySize is null || bodySize.MaxRequestBodySize > MaxSamlAcsFormBytes))
+        {
+            bodySize.MaxRequestBodySize = MaxSamlAcsFormBytes;
+        }
+
+        return request.ReadFormAsync(SamlAcsFormOptions, cancellationToken);
     }
 }

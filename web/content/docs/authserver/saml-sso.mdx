@@ -326,4 +326,6 @@ For metadata rotation, open the delegated portal again or use the dashboard, pas
 
 Use canonical `/sqlos/auth/authorize` and `/sqlos/auth/token` for hosted clients. The explicit `/sqlos/auth/sso/authorization-url` helper is retained for connection-directed flows, but it requires `state`, `codeChallenge`, and `codeChallengeMethod: "S256"` and produces the same PKCE-bound authorization-code record. The old `/sqlos/auth/token/exchange` and `/sqlos/auth/saml/login/{connectionId}` routes are retired.
 
+The ACS bounds its input before it does any work: the form is capped at 2 MB, the encoded `SAMLResponse` at 1 MB (checked before any lookup or base64 decoding), and the parsed document at 512K characters, with DTDs prohibited. An oversized, non-base64, or non-XML post gets the same generic `400` external sign-in error as a rejected assertion, consumes nothing, and leaves the authorization request usable. These limits are fixed secure defaults, not options.
+
 Replay protection uses SqlOS's existing SQL database and expires records after the assertion validity window plus clock skew. It is automatic: applications do not configure a cache or external coordination service.
