@@ -138,7 +138,7 @@ public static partial class EndpointRouteBuilderExtensions
 
             try
             {
-                return Results.Ok(await headlessAuthService.ResolveDeviceAuthorizationAsync(request, cancellationToken));
+                return Results.Ok(await headlessAuthService.ResolveDeviceAuthorizationAsync(request, cancellationToken, context));
             }
             catch (InvalidOperationException ex)
             {

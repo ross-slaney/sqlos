@@ -153,7 +153,7 @@ import { useHeadlessAuth } from "@sqlos/headless/react-native";
 | `invite-login` | Invited email already has an account | `password.login` / OTP |
 | `invite-email-otp-verify` | Verify the code for an invitation signup | `emailOtp.signupVerify` |
 | `invite-accepted` | Invitation bound to the signed-in account | — |
-| `device` | Device-flow user code entry | `device.resolve` |
+| `device` | Device-flow user code entry; a signed-in browser lands on `device-approve`, `organization`, or `mfa` instead | `device.resolve` |
 | `device-approve` | Confirm the device request | `device.approve`, `device.deny` |
 | `device-approved` | Device approved; the device polls `/token` | — |
 | `device-denied` | Device request denied | — |

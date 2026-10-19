@@ -192,6 +192,19 @@ public sealed class SqlOSHeadlessAuthService
                 cancellationToken: cancellationToken);
         }
 
+        // A device request opened by a browser that already holds an issuer session skips
+        // sign-in, exactly like the hosted /device page.
+        if (httpContext != null
+            && string.Equals(NormalizeView(requestedView), "device", StringComparison.Ordinal)
+            && SqlOSDeviceAuthorizationService.IsDeviceAuthorizationRequest(authorizationRequest))
+        {
+            var signedInView = await TryBuildSignedInDeviceViewModelAsync(httpContext, authorizationRequest, cancellationToken);
+            if (signedInView != null)
+            {
+                return signedInView;
+            }
+        }
+
         // A consent reload arrives without its consent token whenever a custom BuildUiUrl
         // delegate did not forward the ConsentToken route field. Re-mint one from the
         // browser's continuation cookie or live issuer session; anonymous reloads get
@@ -262,12 +275,22 @@ public sealed class SqlOSHeadlessAuthService
 
     public async Task<SqlOSHeadlessViewModel> ResolveDeviceAuthorizationAsync(
         SqlOSHeadlessDeviceAuthorizationResolveRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        HttpContext? httpContext = null)
     {
         if (!string.IsNullOrWhiteSpace(request.RequestId))
         {
             var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
             var resolvedRequest = await RequireDeviceAuthorizationService().ResolveAsync(authorizationRequest, user: null, cancellationToken);
+            if (httpContext != null)
+            {
+                var signedInView = await TryBuildSignedInDeviceViewModelAsync(httpContext, authorizationRequest, cancellationToken);
+                if (signedInView != null)
+                {
+                    return signedInView;
+                }
+            }
+
             return await BuildViewModelAsync(
                 authorizationRequest,
                 "device",
@@ -283,6 +306,25 @@ public sealed class SqlOSHeadlessAuthService
 
         var userCode = RequireDeviceUserCode(request.UserCode);
         var resolved = await RequireDeviceAuthorizationService().ResolveAsync(userCode, user: null, cancellationToken);
+        if (httpContext != null
+            && string.Equals(resolved.Status, SqlOSDeviceAuthorizationService.PendingStatus, StringComparison.Ordinal)
+            && _issuerSessionService != null
+            && await _issuerSessionService.TryGetSessionAsync(httpContext, cancellationToken) != null)
+        {
+            // A signed-in browser that typed the code continues on a tracked request, the
+            // same one the /device?user_code= link creates, so organization selection and
+            // MFA have a request to complete against.
+            var standaloneRequest = await RequireDeviceAuthorizationService().CreateOrGetAuthorizationRequestAsync(
+                userCode,
+                "headless",
+                cancellationToken);
+            var signedInView = await TryBuildSignedInDeviceViewModelAsync(httpContext, standaloneRequest, cancellationToken);
+            if (signedInView != null)
+            {
+                return signedInView;
+            }
+        }
+
         return await BuildStandaloneDeviceViewModelAsync(
             "device",
             resolved,
@@ -290,6 +332,60 @@ public sealed class SqlOSHeadlessAuthService
             info: null,
             organizationSelection: resolved.Organizations,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Mirrors the hosted /device page for a browser that already holds an issuer session:
+    /// completes sign-in for the device request from that session, then returns the
+    /// organization or MFA view when one is still required, or the approval view. Returns
+    /// null when the browser has no live session, so the caller keeps the sign-in path.
+    /// </summary>
+    private async Task<SqlOSHeadlessViewModel?> TryBuildSignedInDeviceViewModelAsync(
+        HttpContext httpContext,
+        SqlOSAuthorizationRequest authorizationRequest,
+        CancellationToken cancellationToken)
+    {
+        if (_issuerSessionService == null)
+        {
+            return null;
+        }
+
+        var session = await _issuerSessionService.TryGetSessionAsync(httpContext, cancellationToken);
+        if (session == null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(authorizationRequest.ResolvedAuthMethod))
+        {
+            var completion = await _authorizationServerService.CompleteDeviceApprovalLoginAsync(
+                authorizationRequest,
+                session.User,
+                session.AuthenticationMethod,
+                httpContext,
+                selectedOrganizationId: null,
+                cancellationToken);
+            if (completion.RequiresOrganizationSelection || completion.RequiresMfa)
+            {
+                return (await BuildCompletionActionResultAsync(
+                    authorizationRequest,
+                    completion,
+                    session.User.DefaultEmail,
+                    cancellationToken)).ViewModel;
+            }
+        }
+
+        var resolved = await RequireDeviceAuthorizationService().ResolveAsync(authorizationRequest, session.User, cancellationToken);
+        return await BuildViewModelAsync(
+            authorizationRequest,
+            "device-approve",
+            error: null,
+            pendingToken: null,
+            email: session.User.DefaultEmail,
+            displayName: null,
+            fieldErrors: null,
+            organizationSelection: resolved.Organizations,
+            cancellationToken: cancellationToken);
     }
 
     public async Task<SqlOSHeadlessActionResult> ApproveDeviceAuthorizationAsync(
