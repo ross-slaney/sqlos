@@ -356,7 +356,7 @@ Do not implement recovery by showing the existing secret again. Treat replacemen
 
 ## Secret custody
 
-TOTP secrets are protected with `SqlOSCryptoService.ProtectSecret`, which uses ASP.NET Data Protection when available.
+TOTP secrets are protected with `SqlOSCryptoService.ProtectSecret`, which requires ASP.NET Data Protection. `AddSqlOS` registers it, and SqlOS refuses to persist a secret when no Data Protection provider is available.
 
 Production deployments should configure a durable Data Protection key ring outside the application database. If Data Protection keys are lost, existing protected TOTP secrets cannot be unprotected.
 

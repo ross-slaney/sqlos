@@ -25,7 +25,7 @@ public sealed class SqlOSCryptoServiceTests
     public void HashPassword_VerifyPassword_Succeeds()
     {
         using var context = CreateContext();
-        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
 
         var hash = service.HashPassword("P@ssword123!");
 
@@ -37,7 +37,7 @@ public sealed class SqlOSCryptoServiceTests
     public void Pkce_Rfc7636BoundaryVerifiers_ProduceValidS256Challenges()
     {
         using var context = CreateContext();
-        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
         var minimumVerifier = new string('A', 43);
         var maximumVerifier = new string('~', 128);
 
@@ -58,7 +58,7 @@ public sealed class SqlOSCryptoServiceTests
     public void Pkce_InvalidVerifierShapes_AreRejectedBeforeHashing()
     {
         using var context = CreateContext();
-        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
         var invalidVerifiers = new[]
         {
             new string('A', 42),
@@ -80,7 +80,7 @@ public sealed class SqlOSCryptoServiceTests
     public void Pkce_InvalidS256ChallengeOrVerifier_FailsVerification()
     {
         using var context = CreateContext();
-        var service = new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()));
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
         var validVerifier = new string('A', 43);
         var validChallenge = service.CreatePkceCodeChallenge(validVerifier);
 
@@ -111,9 +111,7 @@ public sealed class SqlOSCryptoServiceTests
     public async Task EnsureActiveSigningKey_WithoutDataProtectionProvider_FailsClosed()
     {
         using var context = CreateContext();
-        var service = new SqlOSCryptoService(
-            context,
-            Options.Create(new SqlOSAuthServerOptions()));
+        var service = CreateServiceWithoutDataProtection(context);
 
         var act = async () => await service.EnsureActiveSigningKeyAsync();
 
@@ -790,6 +788,82 @@ public sealed class SqlOSCryptoServiceTests
         service.UnprotectSecret(protectedSecret).Should().Be("super-secret-value");
     }
 
+    [TestMethod]
+    public void Constructor_WithoutDataProtectionProvider_Throws()
+    {
+        using var context = CreateContext();
+
+        var act = () => new SqlOSCryptoService(context, Options.Create(new SqlOSAuthServerOptions()), null!);
+
+        act.Should().Throw<ArgumentNullException>().WithParameterName("dataProtectionProvider");
+    }
+
+    [TestMethod]
+    public void ProtectSecret_WithoutDataProtection_Throws()
+    {
+        using var context = CreateContext();
+        var service = CreateServiceWithoutDataProtection(context);
+
+        var act = () => service.ProtectSecret("super-secret-value");
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*require ASP.NET Core Data Protection*");
+    }
+
+    [TestMethod]
+    public void ProtectSecret_WithDataProtection_DoesNotPersistPlaintext()
+    {
+        using var context = CreateContext();
+        var service = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+
+        var protectedSecret = service.ProtectSecret("super-secret-value");
+
+        protectedSecret.Should().StartWith("dp:");
+        protectedSecret.Should().NotContain("super-secret-value");
+        service.UnprotectSecret(protectedSecret).Should().Be("super-secret-value");
+    }
+
+    [TestMethod]
+    public void ProtectSecret_EmptyOrWhitespace_ReturnsEmptyWithOrWithoutDataProtection()
+    {
+        using var context = CreateContext();
+        var protectedService = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var unprotectedService = CreateServiceWithoutDataProtection(context);
+
+        foreach (var service in new[] { protectedService, unprotectedService })
+        {
+            service.ProtectSecret("").Should().BeEmpty();
+            service.ProtectSecret("   ").Should().BeEmpty();
+            service.UnprotectSecret("").Should().BeEmpty();
+            service.UnprotectSecret("   ").Should().BeEmpty();
+        }
+    }
+
+    [TestMethod]
+    public void UnprotectSecret_LegacyPlaintext_StillReads()
+    {
+        using var context = CreateContext();
+        var protectedService = CreateDataProtectionService(context, new EphemeralDataProtectionProvider());
+        var unprotectedService = CreateServiceWithoutDataProtection(context);
+
+        protectedService.UnprotectSecret("legacy-plaintext").Should().Be("legacy-plaintext");
+        unprotectedService.UnprotectSecret("legacy-plaintext").Should().Be("legacy-plaintext");
+    }
+
+    [TestMethod]
+    public void UnprotectSecret_ProtectedPayloadWithoutDataProtection_Throws()
+    {
+        using var context = CreateContext();
+        var protectedSecret = CreateDataProtectionService(context, new EphemeralDataProtectionProvider())
+            .ProtectSecret("super-secret-value");
+        var service = CreateServiceWithoutDataProtection(context);
+
+        var act = () => service.UnprotectSecret(protectedSecret);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*no Data Protection provider is available*");
+    }
+
     private static TestSqlOSInMemoryDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<TestSqlOSInMemoryDbContext>()
@@ -802,6 +876,13 @@ public sealed class SqlOSCryptoServiceTests
         TestSqlOSInMemoryDbContext context,
         IDataProtectionProvider provider)
         => new(context, Options.Create(new SqlOSAuthServerOptions()), provider);
+
+    private static SqlOSCryptoService CreateServiceWithoutDataProtection(TestSqlOSInMemoryDbContext context)
+        => new(
+            context,
+            Options.Create(new SqlOSAuthServerOptions()),
+            new SqlOSDataProtectionSigningKeyCustody(),
+            dataProtectionProvider: null);
 
     private static async Task<(SqlOSUser User, SqlOSSession Session, SqlOSClientApplication Client)> SeedTokenContextAsync(
         TestSqlOSInMemoryDbContext context)

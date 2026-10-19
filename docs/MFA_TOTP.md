@@ -146,6 +146,8 @@ amr: totp
 
 ## Secret Custody
 
-TOTP secrets are stored through `SqlOSCryptoService.ProtectSecret`, which uses
-ASP.NET Data Protection when available. Production deployments should configure
-a Data Protection key ring outside the application database.
+TOTP secrets are stored through `SqlOSCryptoService.ProtectSecret`, which
+requires ASP.NET Data Protection. `AddSqlOS` registers it; SqlOS refuses to
+persist a secret when no Data Protection provider is available. Production
+deployments should configure a Data Protection key ring outside the application
+database.

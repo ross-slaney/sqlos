@@ -837,7 +837,7 @@ public sealed class SqlOSScimServiceTests
     private static Harness CreateHarness(TestSqlOSInMemoryDbContext context, SqlOSAuthServerOptions? optionsValue = null)
     {
         var options = Options.Create(optionsValue ?? new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var scim = new SqlOSScimService(context, options, crypto);
         return new Harness(admin, scim);

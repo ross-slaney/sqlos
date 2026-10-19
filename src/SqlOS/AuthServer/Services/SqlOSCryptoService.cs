@@ -38,11 +38,12 @@ public sealed class SqlOSCryptoService
     public SqlOSCryptoService(
         ISqlOSAuthServerDbContext context,
         IOptions<SqlOSAuthServerOptions> options,
-        IDataProtectionProvider? dataProtectionProvider = null)
+        IDataProtectionProvider dataProtectionProvider)
         : this(
             context,
             options,
-            new SqlOSDataProtectionSigningKeyCustody(dataProtectionProvider),
+            new SqlOSDataProtectionSigningKeyCustody(
+                dataProtectionProvider ?? throw new ArgumentNullException(nameof(dataProtectionProvider))),
             dataProtectionProvider,
             validationSigningKeyCache: null)
     {
@@ -76,7 +77,9 @@ public sealed class SqlOSCryptoService
 
         if (_secretProtector == null)
         {
-            return secret;
+            throw new InvalidOperationException(
+                "Persisted secrets require ASP.NET Core Data Protection. " +
+                "Register SqlOS with AddSqlOS, which configures Data Protection, and persist a shared key ring.");
         }
 
         return $"dp:{_secretProtector.Protect(secret)}";
@@ -111,8 +114,8 @@ public sealed class SqlOSCryptoService
 
     /// <summary>
     /// Protects a complete refresh-token response for the retry grace window.
-    /// Unlike general secret protection, this operation fails closed when Data
-    /// Protection is unavailable and embeds a cryptographic expiry in the
+    /// Like general secret protection, this operation fails closed when Data
+    /// Protection is unavailable; it also embeds a cryptographic expiry in the
     /// protected payload.
     /// </summary>
     internal string ProtectRefreshTokenResponse(string responseJson, TimeSpan lifetime)

@@ -31,7 +31,7 @@ public sealed class ScimAdminHardeningIntegrationTests
         var setupAdmin = new SqlOSAdminService(
             setupContext,
             setupOptions,
-            new SqlOSCryptoService(setupContext, setupOptions));
+            new SqlOSCryptoService(setupContext, setupOptions, AspireFixture.DataProtectionProvider));
         var organization = await setupAdmin.CreateOrganizationAsync(
             new SqlOSCreateOrganizationRequest("Seed lock organization", "seed-lock"));
         optionsValue.SeedScimConnection("seed-lock", seed =>
@@ -49,7 +49,7 @@ public sealed class ScimAdminHardeningIntegrationTests
             var capturedAdmin = new SqlOSAdminService(
                 capturedContext,
                 capturedOptions,
-                new SqlOSCryptoService(capturedContext, capturedOptions));
+                new SqlOSCryptoService(capturedContext, capturedOptions, AspireFixture.DataProtectionProvider));
             await capturedAdmin.UpsertSeededScimConnectionsAsync();
         }
 
@@ -78,7 +78,7 @@ public sealed class ScimAdminHardeningIntegrationTests
             {
                 await ready.Task;
                 var options = Options.Create(optionsValue);
-                var admin = new SqlOSAdminService(context, options, new SqlOSCryptoService(context, options));
+                var admin = new SqlOSAdminService(context, options, new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider));
                 await admin.UpsertSeededScimConnectionsAsync();
             })).ToArray();
             ready.SetResult();
@@ -116,7 +116,7 @@ public sealed class ScimAdminHardeningIntegrationTests
             var setupAdmin = new SqlOSAdminService(
                 setupContext,
                 setupOptions,
-                new SqlOSCryptoService(setupContext, setupOptions));
+                new SqlOSCryptoService(setupContext, setupOptions, AspireFixture.DataProtectionProvider));
             var organization = await setupAdmin.CreateOrganizationAsync(
                 new SqlOSCreateOrganizationRequest("Grant batch organization", "grant-batch"));
             // Mapped grants must stay inside the connection's grant boundary (#421).
@@ -223,7 +223,7 @@ public sealed class ScimAdminHardeningIntegrationTests
             var revokeAdmin = new SqlOSAdminService(
                 revokeContext,
                 revokeOptions,
-                new SqlOSCryptoService(revokeContext, revokeOptions));
+                new SqlOSCryptoService(revokeContext, revokeOptions, AspireFixture.DataProtectionProvider));
 
             await revokeAdmin.SetScimConnectionEnabledAsync(connection.ConnectionId, enabled: false);
 

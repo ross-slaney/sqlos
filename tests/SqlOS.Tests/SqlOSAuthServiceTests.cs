@@ -2754,6 +2754,7 @@ public sealed class SqlOSAuthServiceTests
         var dbOnlyCrypto = new SqlOSCryptoService(
             harness.Context,
             Options.Create(harness.Options),
+            new SqlOSDataProtectionSigningKeyCustody(),
             dataProtectionProvider: null);
         var act = () => dbOnlyCrypto.UnprotectRefreshTokenResponse(consumed.ReplacementTokenResponse!);
 

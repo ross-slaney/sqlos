@@ -22,7 +22,7 @@ public sealed class ApplicationAccessSeedIntegrationTests
             var connectionString = setupContext.Database.GetConnectionString()!;
             var optionsValue = new SqlOSAuthServerOptions();
             var setupOptions = Options.Create(optionsValue);
-            var setupAdmin = new SqlOSAdminService(setupContext, setupOptions, new SqlOSCryptoService(setupContext, setupOptions));
+            var setupAdmin = new SqlOSAdminService(setupContext, setupOptions, new SqlOSCryptoService(setupContext, setupOptions, AspireFixture.DataProtectionProvider));
             var organization = await setupAdmin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Seeded access", "seeded-access"));
             optionsValue.SeedClient(client =>
             {
@@ -51,7 +51,7 @@ public sealed class ApplicationAccessSeedIntegrationTests
                 {
                     await ready.Task;
                     var options = Options.Create(optionsValue);
-                    var admin = new SqlOSAdminService(context, options, new SqlOSCryptoService(context, options));
+                    var admin = new SqlOSAdminService(context, options, new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider));
                     await admin.UpsertSeededClientsAsync();
                 })).ToArray();
                 ready.SetResult();

@@ -21,7 +21,7 @@ public sealed class SqlOSAuthorizationPromptTests
         var optionsValue = new SqlOSAuthServerOptions();
         optionsValue.SeedBrowserClient("public-web", "Public Web", "https://app.example.test/auth/callback");
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
@@ -108,7 +108,7 @@ public sealed class SqlOSAuthorizationPromptTests
         var optionsValue = new SqlOSAuthServerOptions();
         optionsValue.SeedBrowserClient("maxage-web", "MaxAge Web", "https://app.example.test/auth/callback");
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
@@ -169,7 +169,7 @@ public sealed class SqlOSAuthorizationPromptTests
         var optionsValue = new SqlOSAuthServerOptions();
         optionsValue.SeedBrowserClient("prompt-web", "Prompt Web", "https://app.example.test/auth/callback");
         var options = Options.Create(optionsValue);
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var emailSender = new TestAuthEmailSender();
         var settings = new SqlOSSettingsService(context, options, emailSender);
