@@ -1651,7 +1651,10 @@ public sealed partial class SamlServiceIntegrationTests
         var samlResponse = Convert.ToBase64String(Encoding.UTF8.GetBytes(xml));
         var action = async () => await saml.HandleAcsAsync(connection.Id, samlResponse, flow.RelayState, default);
 
-        await action.Should().ThrowAsync<XmlException>();
+        var rejection = await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage(SqlOSSamlService.SamlResponseMalformedMessage);
+        rejection.Which.InnerException.Should().BeOfType<XmlException>()
+            .Which.Message.Should().Contain("DTD is prohibited");
     }
 
     private static async Task AssertNoFirstLinkSideEffectsAsync(

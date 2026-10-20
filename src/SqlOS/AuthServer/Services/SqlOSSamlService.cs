@@ -25,6 +25,13 @@ public sealed class SqlOSSamlService
     private const string SamlBearerConfirmationMethod = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
     private const string SamlStatePropertyName = "__sqlosSaml";
     internal const string RequestDeniedAuditEvent = "user.login.saml.request_denied";
+    // A signed response with a full attribute set is tens of kilobytes. These caps
+    // bound the work an unauthenticated ACS post can cause: the encoded length is
+    // checked before any lookup or decoding, and the reader stops at the document cap.
+    internal const int MaxEncodedSamlResponseLength = 1024 * 1024;
+    internal const long MaxSamlDocumentCharacters = 512 * 1024;
+    internal const string SamlResponseTooLargeMessage = "SAML response is too large.";
+    internal const string SamlResponseMalformedMessage = "SAML response is malformed.";
     private static readonly TimeSpan SamlClockSkew = TimeSpan.FromMinutes(5);
     private static readonly HashSet<string> AllowedSignatureMethods = new(StringComparer.Ordinal)
     {
@@ -155,6 +162,11 @@ public sealed class SqlOSSamlService
 
     public async Task<string> HandleAcsAsync(string connectionId, string samlResponse, string relayState, HttpContext? httpContext = null, CancellationToken cancellationToken = default)
     {
+        if (samlResponse.Length > MaxEncodedSamlResponseLength)
+        {
+            throw new InvalidOperationException(SamlResponseTooLargeMessage);
+        }
+
         var connection = await _context.Set<SqlOSSsoConnection>().FirstOrDefaultAsync(x => x.Id == connectionId && x.IsEnabled, cancellationToken)
             ?? throw new InvalidOperationException("SAML connection not found or disabled.");
         var authorizationRequest = await _context.Set<SqlOSAuthorizationRequest>()
@@ -395,8 +407,16 @@ public sealed class SqlOSSamlService
         SqlOSSsoConnection connection,
         SamlValidationContext validationContext)
     {
-        var xml = Encoding.UTF8.GetString(Convert.FromBase64String(base64Response));
-        var xmlDoc = LoadSamlDocument(xml);
+        XmlDocument xmlDoc;
+        try
+        {
+            var xml = Encoding.UTF8.GetString(Convert.FromBase64String(base64Response));
+            xmlDoc = LoadSamlDocument(xml);
+        }
+        catch (Exception ex) when (ex is FormatException or XmlException)
+        {
+            throw new InvalidOperationException(SamlResponseMalformedMessage, ex);
+        }
 
         var ns = new XmlNamespaceManager(xmlDoc.NameTable);
         ns.AddNamespace("samlp", SamlProtocolNs);
@@ -560,7 +580,8 @@ public sealed class SqlOSSamlService
         var settings = new XmlReaderSettings
         {
             DtdProcessing = DtdProcessing.Prohibit,
-            XmlResolver = null
+            XmlResolver = null,
+            MaxCharactersInDocument = MaxSamlDocumentCharacters
         };
         var xmlDocument = new XmlDocument
         {
