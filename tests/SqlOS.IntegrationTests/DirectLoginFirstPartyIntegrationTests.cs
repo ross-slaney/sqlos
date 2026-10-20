@@ -202,6 +202,7 @@ public sealed class DirectLoginFirstPartyIntegrationTests
             await AssertRejectedAsync(host, client, "/sqlos/auth/email-otp/verify", () => host.Client.PostAsJsonAsync(
                 "/sqlos/auth/email-otp/verify",
                 new { challengeToken, code = otpCode }));
+            await AssertEmailOtpVerifyLeftTheAccountUntouchedAsync(host, otpUser.Id, client.Id);
 
             await AssertRejectedAsync(host, client, "/sqlos/auth/magic-link/complete", () => host.Client.PostAsJsonAsync(
                 "/sqlos/auth/magic-link/complete",
@@ -294,8 +295,60 @@ public sealed class DirectLoginFirstPartyIntegrationTests
         await AssertRejectedAsync(host, client, "/sqlos/auth/email-otp/verify", () => host.Client.PostAsJsonAsync(
             "/sqlos/auth/email-otp/verify",
             new { challengeToken, code = host.LatestOtpCode(victim.Email) }));
+        await AssertEmailOtpVerifyLeftTheAccountUntouchedAsync(host, victim.Id, client.Id);
         (await host.QueryAsync(db => db.Set<SqlOSSession>().CountAsync(x => x.UserId == victim.Id)))
             .Should().Be(0);
+    }
+
+    [TestMethod]
+    public async Task ThirdPartyClient_EmailOtpVerify_RefusesBeforeTheCodeIsConsumedOrTheAddressClaimed()
+    {
+        await using var host = await DirectLoginHost.CreateAsync();
+        var client = await host.RegisterThirdPartyClientAsync(ThirdPartyKind.Cimd);
+        var victim = await host.CreateUserAsync("claim");
+        using (var login = await host.Client.PostAsJsonAsync(
+            "/sqlos/auth/password/login",
+            new { email = victim.Email, password = Password, clientId = HostedAuthorizeTokenFixture.ClientId }))
+        {
+            await AssertTokensAsync(login, "tokens");
+        }
+
+        var challengeToken = await host.WhileFirstPartyAsync(client, async () =>
+        {
+            using var response = await host.Client.PostAsJsonAsync(
+                "/sqlos/auth/email-otp/start",
+                new { email = victim.Email, clientId = client.ClientId });
+            return await ReadStringAsync(response, "challengeToken");
+        });
+        var code = host.LatestOtpCode(victim.Email);
+
+        await AssertRejectedAsync(host, client, "/sqlos/auth/email-otp/verify", () => host.Client.PostAsJsonAsync(
+            "/sqlos/auth/email-otp/verify",
+            new { challengeToken, code }));
+        await AssertEmailOtpVerifyLeftTheAccountUntouchedAsync(host, victim.Id, client.Id);
+        (await host.QueryAsync(db => db.Set<SqlOSSession>().CountAsync(x => x.UserId == victim.Id && x.RevokedAt != null)))
+            .Should().Be(0, "the sign-in session from before the refusal stays active");
+        var sessionIds = await host.QueryAsync(db => db.Set<SqlOSSession>()
+            .Where(x => x.UserId == victim.Id)
+            .Select(x => x.Id)
+            .ToListAsync());
+        (await host.QueryAsync(db => db.Set<SqlOSRefreshToken>().CountAsync(x => sessionIds.Contains(x.SessionId) && x.RevokedAt != null)))
+            .Should().Be(0);
+
+        await host.WhileFirstPartyAsync(client, async () =>
+        {
+            using var verified = await host.Client.PostAsJsonAsync(
+                "/sqlos/auth/email-otp/verify",
+                new { challengeToken, code });
+            await AssertTokensAsync(verified, "tokens");
+            return true;
+        });
+        (await host.QueryAsync(db => db.Set<SqlOSUserEmail>().AsNoTracking().SingleAsync(x => x.UserId == victim.Id)))
+            .IsVerified.Should().BeTrue("the same code still claims the address once the client is first-party");
+        (await host.QueryAsync(db => db.Set<SqlOSCredential>().CountAsync(x => x.UserId == victim.Id && x.RevokedAt != null)))
+            .Should().Be(1, "that later claim is what revokes the password attached before the proof");
+        (await host.QueryAsync(db => db.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "user.email.claimed" && x.UserId == victim.Id)))
+            .Should().Be(1);
     }
 
     [TestMethod]
@@ -484,6 +537,25 @@ public sealed class DirectLoginFirstPartyIntegrationTests
 
         (await host.QueryAsync(db => db.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == RejectedEvent)))
             .Should().Be(0, "first-party direct login is never rejected");
+    }
+
+    private static async Task AssertEmailOtpVerifyLeftTheAccountUntouchedAsync(
+        DirectLoginHost host,
+        string userId,
+        string clientApplicationId)
+    {
+        var challenge = await host.QueryAsync(db => db.Set<SqlOSEmailOtpChallenge>()
+            .AsNoTracking()
+            .SingleAsync(x => x.UserId == userId && x.ClientApplicationId == clientApplicationId));
+        challenge.ConsumedAt.Should().BeNull("a refused verify leaves the code unconsumed");
+        challenge.InvalidatedAt.Should().BeNull();
+        challenge.AttemptCount.Should().Be(0, "a refused verify does not count an attempt");
+        (await host.QueryAsync(db => db.Set<SqlOSUserEmail>().AsNoTracking().SingleAsync(x => x.UserId == userId)))
+            .IsVerified.Should().BeFalse("a refused verify does not claim the address");
+        (await host.QueryAsync(db => db.Set<SqlOSCredential>().CountAsync(x => x.UserId == userId && x.RevokedAt != null)))
+            .Should().Be(0, "a refused verify does not revoke credentials attached before the proof");
+        (await host.QueryAsync(db => db.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "user.email.claimed" && x.UserId == userId)))
+            .Should().Be(0);
     }
 
     private static async Task AssertRejectedAsync(

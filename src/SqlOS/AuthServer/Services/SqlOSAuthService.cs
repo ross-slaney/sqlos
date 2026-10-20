@@ -396,6 +396,12 @@ public sealed class SqlOSAuthService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // The challenge already names its client. Refuse a third-party client before verification
+        // spends the code or claims the address: that claim revokes credentials, sessions, and
+        // grants that were attached before the mailbox was proved. FinalizeClientLoginAsync
+        // repeats the same gate before it mints a session.
+        await EnsureEmailOtpVerifyClientIsFirstPartyAsync(request, httpContext, cancellationToken);
+
         var verification = await _emailOtpService.VerifyAsync(request, cancellationToken);
         if (verification.Challenge.ClientApplicationId == null)
         {
@@ -2289,6 +2295,54 @@ public sealed class SqlOSAuthService
         {
             await EnsureArtifactClientIsFirstPartyAsync(token, httpContext, cancellationToken);
         }
+    }
+
+    /// <summary>
+    /// Refuses a third-party client named by an active email-code challenge before
+    /// <see cref="SqlOSEmailOtpService.VerifyAsync"/> spends the code or claims the address.
+    /// An inactive challenge is left to verification, which answers with the generic invalid-code
+    /// error and writes nothing. The lookup is untracked so verification's attempt counter is not
+    /// overwritten by a stale tracked value.
+    /// </summary>
+    private async Task EnsureEmailOtpVerifyClientIsFirstPartyAsync(
+        SqlOSEmailOtpVerifyRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var rawChallengeToken = request.ChallengeToken?.Trim();
+        if (string.IsNullOrWhiteSpace(rawChallengeToken))
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var binding = await _context.Set<SqlOSEmailOtpChallenge>()
+            .AsNoTracking()
+            .Where(x => x.ChallengeTokenHash == _cryptoService.HashToken(rawChallengeToken)
+                && x.ConsumedAt == null
+                && x.InvalidatedAt == null
+                && x.ExpiresAt > now
+                && x.AttemptCount < x.MaxAttempts)
+            .Select(x => new { x.ClientApplicationId, x.UserId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (binding?.ClientApplicationId == null)
+        {
+            return;
+        }
+
+        var client = await _context.Set<SqlOSClientApplication>()
+            .FirstOrDefaultAsync(x => x.Id == binding.ClientApplicationId, cancellationToken);
+        if (client == null)
+        {
+            return;
+        }
+
+        await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(
+            _adminService,
+            client,
+            httpContext,
+            binding.UserId,
+            cancellationToken);
     }
 
     /// <summary>

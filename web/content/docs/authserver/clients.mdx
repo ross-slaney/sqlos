@@ -227,10 +227,13 @@ with `400` and `{ "error": "invalid_client" }`, and the service methods throw
 `SqlOSPublicAuthException` with the same error. The refusal happens before
 SqlOS checks a password, sends an email or SMS, creates provider state, creates
 an account, or mints a session. A code, link, or provider state issued before
-the client lost first-party status is refused when it is redeemed. SqlOS
-records one `oauth.direct_login.rejected` audit event with the `client_id` and
-the request route. Third-party clients sign users in through `/authorize`,
-where the consent screen runs, including for social and SAML sign-in.
+the client lost first-party status is refused when it is redeemed. On
+`POST /sqlos/auth/email-otp/verify` that refusal happens before the code is
+consumed and before an unverified address is claimed, so the code stays unused
+and credentials, sessions, and grants are left as they were. SqlOS records one
+`oauth.direct_login.rejected` audit event with the `client_id` and the request
+route. Third-party clients sign users in through `/authorize`, where the
+consent screen runs, including for social and SAML sign-in.
 
 `SeedBrowserClient`, `SeedOwnedWebApp`, `SeedOwnedNativeApp`, `SeedCliClient`,
 the single-application setup, and the dashboard's owned-app and CLI templates
