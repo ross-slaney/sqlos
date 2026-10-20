@@ -298,22 +298,6 @@ public static partial class EndpointRouteBuilderExtensions
                         cancellationToken);
                     if (completion.RequiresOrganizationSelection || completion.RequiresMfa)
                     {
-                        if (headlessAuthService.IsBrowserUiEnabled)
-                        {
-                            return Results.Redirect(headlessAuthService.BuildUiUrl(
-                                context,
-                                authorizationRequest.Id,
-                                completion.RequiresOrganizationSelection
-                                    ? "organization"
-                                    : completion.RequiresMfaEnrollment ? "mfa-enroll" : "mfa",
-                                error: null,
-                                pendingToken: completion.PendingToken,
-                                email: session.User.DefaultEmail,
-                                displayName: null,
-                                uiContext: SqlOSHeadlessAuthService.ParseUiContext(authorizationRequest.UiContextJson),
-                                mfaToken: completion.MfaToken));
-                        }
-
                         return await RenderHostedAuthorizationCompletionAsync(
                             completion,
                             authorizationRequest,
