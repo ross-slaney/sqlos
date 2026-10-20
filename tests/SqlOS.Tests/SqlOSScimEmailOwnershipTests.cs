@@ -286,7 +286,7 @@ public sealed class SqlOSScimEmailOwnershipTests
         });
         await context.SaveChangesAsync();
         var options = Options.Create(new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
         var scim = new SqlOSScimService(context, options, crypto);
         var draft = await admin.CreateScimConnectionDraftAsync(new SqlOSCreateScimConnectionRequest(OrganizationId, "Acme SCIM", false));

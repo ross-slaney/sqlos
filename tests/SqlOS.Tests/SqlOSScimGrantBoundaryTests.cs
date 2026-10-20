@@ -773,7 +773,7 @@ public sealed class SqlOSScimGrantBoundaryTests
         await context.SaveChangesAsync();
 
         var options = Options.Create(optionsValue ?? new SqlOSAuthServerOptions());
-        var crypto = new SqlOSCryptoService(context, options);
+        var crypto = TestCryptoService.Create(context, options);
         return new Fixture(
             context,
             new SqlOSAdminService(context, options, crypto),

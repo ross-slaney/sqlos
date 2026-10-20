@@ -133,6 +133,6 @@ public sealed class AuditLogIdempotencyIntegrationTests
     private static SqlOSAuditLogService CreateService(TestSqlOSDbContext context)
     {
         var options = Options.Create(new SqlOSAuthServerOptions());
-        return new SqlOSAuditLogService(context, new SqlOSCryptoService(context, options));
+        return new SqlOSAuditLogService(context, new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider));
     }
 }

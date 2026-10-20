@@ -27,7 +27,7 @@ public sealed class AdminCursorPaginationIntegrationTests
         var setupAdmin = new SqlOSAdminService(
             setupContext,
             options,
-            new SqlOSCryptoService(setupContext, options));
+            new SqlOSCryptoService(setupContext, options, AspireFixture.DataProtectionProvider));
 
         for (var index = 0; index < 35; index++)
         {
@@ -42,7 +42,7 @@ public sealed class AdminCursorPaginationIntegrationTests
         var admin = new SqlOSAdminService(
             capturedContext,
             options,
-            new SqlOSCryptoService(capturedContext, options));
+            new SqlOSCryptoService(capturedContext, options, AspireFixture.DataProtectionProvider));
 
         interceptor.Commands.Clear();
         var first = Serialize(await admin.ListUsersAsync(pageSize: 10));

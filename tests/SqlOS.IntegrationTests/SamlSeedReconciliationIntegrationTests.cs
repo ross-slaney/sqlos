@@ -22,7 +22,7 @@ public sealed class SamlSeedReconciliationIntegrationTests
         try
         {
             var setupOptions = Options.Create(new SqlOSAuthServerOptions());
-            var setupAdmin = new SqlOSAdminService(setup, setupOptions, new SqlOSCryptoService(setup, setupOptions));
+            var setupAdmin = new SqlOSAdminService(setup, setupOptions, new SqlOSCryptoService(setup, setupOptions, AspireFixture.DataProtectionProvider));
             var organization = await setupAdmin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Concurrent SAML", "concurrent-saml"));
             var optionsValue = new SqlOSAuthServerOptions();
             optionsValue.SeedSamlConnection("workforce", seed =>
@@ -42,7 +42,7 @@ public sealed class SamlSeedReconciliationIntegrationTests
                 var tasks = contexts.Select(context => Task.Run(async () =>
                 {
                     var options = Options.Create(optionsValue);
-                    var admin = new SqlOSAdminService(context, options, new SqlOSCryptoService(context, options));
+                    var admin = new SqlOSAdminService(context, options, new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider));
                     await ready.Task;
                     await admin.UpsertSeededSamlConnectionsAsync();
                 })).ToArray();

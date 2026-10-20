@@ -29,13 +29,13 @@ public sealed class ControlPlaneParityPersistenceIntegrationTests
                 seed.AllowedScopes = ["openid", "profile"];
             });
             var options = Options.Create(optionsValue);
-            var firstAdmin = new SqlOSAdminService(firstContext, options, new SqlOSCryptoService(firstContext, options));
+            var firstAdmin = new SqlOSAdminService(firstContext, options, new SqlOSCryptoService(firstContext, options, AspireFixture.DataProtectionProvider));
             await firstAdmin.UpsertSeededClientsAsync();
             var firstFingerprint = (await firstContext.Set<SqlOSClientApplication>().AsNoTracking().SingleAsync()).ConfigurationFingerprint;
 
             await using var secondContext = new TestSqlOSDbContext(
                 new DbContextOptionsBuilder<TestSqlOSDbContext>().UseTestProvider(connectionString).Options);
-            var secondAdmin = new SqlOSAdminService(secondContext, options, new SqlOSCryptoService(secondContext, options));
+            var secondAdmin = new SqlOSAdminService(secondContext, options, new SqlOSCryptoService(secondContext, options, AspireFixture.DataProtectionProvider));
             await secondAdmin.UpsertSeededClientsAsync();
 
             var persisted = await secondContext.Set<SqlOSClientApplication>().AsNoTracking().SingleAsync();

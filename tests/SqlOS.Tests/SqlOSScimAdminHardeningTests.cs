@@ -60,7 +60,7 @@ public sealed class SqlOSScimAdminHardeningTests
     private static SqlOSAdminService CreateAdmin(TestSqlOSInMemoryDbContext context)
     {
         var options = Options.Create(new SqlOSAuthServerOptions());
-        return new SqlOSAdminService(context, options, new SqlOSCryptoService(context, options));
+        return new SqlOSAdminService(context, options, TestCryptoService.Create(context, options));
     }
 
     private static TestSqlOSInMemoryDbContext CreateContext()
