@@ -1,0 +1,65 @@
+---
+title: "SqlOS 11.1.0: A signed-in browser approves the device"
+description: "Headless device approval uses the issuer session already in the browser, and the sign-in edges around email codes, stored secrets, and SAML posts fail closed."
+date: "2026-10-20"
+author: "Ross Slaney"
+tags: ["AuthServer", "OAuth", "SAML", "Headless", "Security", "SqlOS"]
+---
+
+11.1.0 is a minor release. A browser that is already signed in can approve a device without signing in again, in hosted mode and in a headless login UI. The same release closes four sign-in edges that used to spend a code, store a secret in plaintext, accept an unbounded SAML post, or leave an unverified address signed in after an organization revoked sessions for its SSO domain.
+
+## A live issuer session goes straight to approval
+
+Opening a device link, or typing a user code, in a headless login UI used to show the sign-in form even when that browser already held an issuer session. Hosted mode already skipped that form.
+
+Both modes now do the same thing. A live session completes sign-in for the device request. When the account still needs an organization or MFA, that step comes next. Otherwise the browser lands on the approval screen, with the signed-in email. Approve and deny stay explicit. An expired or revoked session still shows the sign-in form, and a signed-out browser is unchanged.
+
+`@sqlos/headless` already renders `device-approve`, `organization`, and `mfa`. This release does not change that view contract. It changes which view SqlOS returns when a session exists.
+
+See [Add sign-in to a terminal app](/docs/guides/terminal-auth) and the [`device` view](/docs/reference/headless-js).
+
+## An email code stays unused when the client is third-party
+
+Direct sign-in returns tokens with no consent screen, so only first-party clients may call it. `POST /sqlos/auth/email-otp/verify` used to apply that rule after the code was consumed and after an unverified address was claimed. That claim revoked the credentials, sessions, and grants attached to the account.
+
+The verify step now refuses a third-party client while the challenge is still active, before the code is checked. The code stays unused, nothing is claimed, and SqlOS records one `oauth.direct_login.rejected` audit event. Hosted and headless verification through `/authorize` is unchanged.
+
+See [Direct sign-in is first-party only](/docs/authserver/clients#direct-sign-in-is-first-party-only).
+
+## Stored secrets require Data Protection
+
+`ProtectSecret` used to return the raw value when no Data Protection provider was registered. Client secrets, Apple keys, TOTP secrets, phone numbers, and calendar tokens could be written to the database unprotected.
+
+It now throws when Data Protection is unavailable. `AddSqlOS` already registers Data Protection, so a normal host needs no new setting, and there is no switch that allows plaintext. Rows stored without the `dp:` prefix still read. A `dp:` payload without a provider still throws.
+
+The public `SqlOSCryptoService` constructor requires an `IDataProtectionProvider`. Omitting it, or passing `null`, does not compile.
+
+See [Secret custody](/docs/authserver/mfa-totp#secret-custody).
+
+## A bad SAML post is a 400
+
+The assertion consumer used ASP.NET's default form limits. An oversized field, or a `SAMLResponse` that was not base64 or not XML, came back as a 500.
+
+The form is capped at 2 MB, the encoded `SAMLResponse` at 1 MB before any lookup or decoding, and the parsed document at 512K characters. Those failures return the same generic external sign-in error as a rejected assertion, with status 400, and they are audited. Nothing is consumed, so the authorization request can still complete with a valid signed response afterward. The limits are fixed. They are not options.
+
+See [SAML SSO](/docs/authserver/saml-sso).
+
+## Organization sign-out includes unverified addresses
+
+Revoking sessions for an organization's SSO domain now covers every account with an address at that verified domain, including addresses that are not yet verified. Accounts at other domains, and sessions that belong to another organization, stay signed in.
+
+See [SAML SSO](/docs/authserver/saml-sso) and [Customer-managed SSO](/docs/guides/customer-managed-sso).
+
+## Upgrade
+
+```bash
+dotnet add package SqlOS --version 11.1.0
+npm install @sqlos/headless@11.1.0
+```
+
+Two compile-time changes:
+
+1. Delete a leftover `MapAuthServer()` call. `AddSqlOS` maps the auth, audit, email, and calendar routes. Calling the old mapper as well is what dropped the audit, email, and calendar routes. See [Endpoint mapping](/docs/reference/hosting-api#endpoint-mapping).
+2. If you construct `SqlOSCryptoService` yourself, pass an `IDataProtectionProvider`. Hosts that only call `AddSqlOS` already have one.
+
+No schema migration. No new operator setting.
