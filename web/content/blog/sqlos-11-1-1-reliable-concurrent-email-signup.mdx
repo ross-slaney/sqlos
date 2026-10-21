@@ -1,0 +1,24 @@
+---
+title: "SqlOS 11.1.1: Reliable concurrent email signup"
+description: "Concurrent submissions of the same valid signup code now produce one account and a normal rejection for the other requests."
+date: "2026-10-21"
+author: "Ross Slaney"
+tags: ["AuthServer", "SqlOS"]
+---
+
+SqlOS 11.1.1 fixes a race when several requests submit the same valid email signup code at once. Previously, competing requests could attempt to create the same account before the signup artifact was consumed, producing a database uniqueness error instead of an ordinary invalid-or-used-code response.
+
+Hosted, headless and direct signup now claim the signup artifact inside the relational transaction before creating the account. One request succeeds; competing requests receive the normal rejection. If later signup work fails, the transaction rolls back the claim along with the account changes, allowing a valid retry. Incorrect-code attempt tracking remains outside this transaction.
+
+The regression suite covers concurrent submissions and rollback after a failing signup hook. No application configuration or schema change is required for this patch.
+
+## Upgrade
+
+```bash
+dotnet add package SqlOS --version 11.1.1
+npm install @sqlos/headless@11.1.1
+```
+
+The signup correction is server-side. The headless package is published at the matching version to keep the release aligned.
+
+See the [headless JavaScript reference](/docs/reference/headless-js) and [application quickstart](/docs/quickstarts/add-to-app) for integration guidance.
