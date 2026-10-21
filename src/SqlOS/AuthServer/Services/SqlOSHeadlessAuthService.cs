@@ -978,6 +978,13 @@ public sealed class SqlOSHeadlessAuthService
                 transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
             }
 
+            // Claim the one-use artifacts inside the transaction before inserting a user.
+            // A losing concurrent submission gets the normal invalid-code response.
+            if (transaction != null)
+            {
+                await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            }
+
             signup = await _authorizationServerService.SignUpWithEmailOtpAsync(
                 verification.DisplayName,
                 verification.Email,
@@ -1013,7 +1020,10 @@ public sealed class SqlOSHeadlessAuthService
                 httpContext,
                 cancellationToken);
 
-            await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            if (transaction == null)
+            {
+                await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            }
             await _adminService.RecordAuditAsync(
                 "user.signup.email_otp",
                 "user",

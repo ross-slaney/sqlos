@@ -602,6 +602,13 @@ public sealed class SqlOSAuthService
                 .FirstAsync(x => x.Id == verification.ClientApplicationId, cancellationToken);
             await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
 
+            // Serialize successful submissions on the one-use artifacts before account
+            // creation; consumption rolls back if the surrounding signup fails.
+            if (transaction != null)
+            {
+                await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            }
+
             signup = await CreateEmailOtpSignupUserAsync(
                 verification.DisplayName,
                 verification.Email,
@@ -629,7 +636,10 @@ public sealed class SqlOSAuthService
                     cancellationToken);
             }
 
-            await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            if (transaction == null)
+            {
+                await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            }
             await _adminService.RecordAuditAsync(
                 "user.signup.email_otp",
                 "user",
