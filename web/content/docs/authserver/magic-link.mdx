@@ -154,4 +154,6 @@ options.AuthServer.ConfigureMagicLink(link =>
 });
 ```
 
+SqlOS reserves the email, IP, and client buckets in one distributed rate-limit transaction before it creates or sends a link, so concurrent requests and replicas cannot exceed the lowest overlapping cap. A request inside the resend cooldown is rejected before it reserves anything. A delivery failure keeps the reserved slot; the `RateLimitWindow` expiry restores capacity.
+
 Audit events include `magic_link.requested`, `magic_link.completed`, `magic_link.rejected`, `magic_link.rate_limit_rejected`, and `magic_link.send_failed`.
