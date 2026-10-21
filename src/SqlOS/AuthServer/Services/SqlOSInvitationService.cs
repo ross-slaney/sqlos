@@ -53,7 +53,7 @@ public sealed class SqlOSInvitationService
         CancellationToken cancellationToken = default)
     {
         var organization = await RequireActiveOrganizationAsync(request.OrganizationId, cancellationToken);
-        if (!SqlOSEmailAddress.TryCanonicalize(request.Email, out var invitedEmail, out var normalizedEmail))
+        if (!SqlOSEmailAddress.TryCanonicalizeSubmitted(request.Email, out var invitedEmail, out var normalizedEmail))
         {
             throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
         }

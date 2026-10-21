@@ -88,4 +88,17 @@ public sealed class SqlOSPublicAuthErrorMapperTests
         mapped.PublicMessage.Should().Be(message);
         mapped.HasDiagnosticDetail.Should().BeFalse();
     }
+
+    [DataTestMethod]
+    [DataRow(SqlOSPublicAuthErrorSurface.HostedPage)]
+    [DataRow(SqlOSPublicAuthErrorSurface.HeadlessApi)]
+    public void PublicErrorMapper_PreservesTheInvalidEmailMessage(SqlOSPublicAuthErrorSurface surface)
+    {
+        var mapped = SqlOSPublicAuthErrorMapper.Map(
+            new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage),
+            surface);
+
+        mapped.PublicMessage.Should().Be("Enter a valid email address.");
+        mapped.HasDiagnosticDetail.Should().BeFalse();
+    }
 }

@@ -39,6 +39,37 @@ internal static class SqlOSEmailAddress
     public const int MaxLength = 320;
     public const string InvalidEmailMessage = "Enter a valid email address.";
 
+    /// <summary>
+    /// Like <see cref="TryCanonicalize"/>, but for an address a person types to create an account
+    /// or invitation. It additionally requires a plain mailbox: no RFC 5322 specials that only make
+    /// sense in display names or quoted forms (<c>&lt; &gt; " ( ) , ; \</c>), and the address
+    /// must round-trip through <see cref="System.Net.Mail.MailAddress"/> unchanged. Addresses
+    /// asserted by an identity provider or SCIM keep using <see cref="TryCanonicalize"/>.
+    /// </summary>
+    public static bool TryCanonicalizeSubmitted(string? value, out string address, out string normalizedEmail)
+    {
+        if (!TryCanonicalize(value, out address, out normalizedEmail)
+            || address.AsSpan().IndexOfAny(SubmittedAddressSpecials) >= 0)
+        {
+            address = string.Empty;
+            normalizedEmail = string.Empty;
+            return false;
+        }
+
+        if (!System.Net.Mail.MailAddress.TryCreate(address, out var parsed)
+            || !string.Equals(parsed.Address, address, StringComparison.Ordinal))
+        {
+            address = string.Empty;
+            normalizedEmail = string.Empty;
+            return false;
+        }
+
+        return true;
+    }
+
+    private static readonly System.Buffers.SearchValues<char> SubmittedAddressSpecials =
+        System.Buffers.SearchValues.Create("<>\"(),;\\");
+
     /// <summary>Computes the canonical key, or returns false when the address is not valid.</summary>
     public static bool TryNormalize(string? value, out string normalizedEmail)
         => TryCanonicalize(value, out _, out normalizedEmail);

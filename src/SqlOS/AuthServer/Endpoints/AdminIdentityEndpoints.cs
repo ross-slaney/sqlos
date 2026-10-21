@@ -150,16 +150,23 @@ public static partial class EndpointRouteBuilderExtensions
                 return Results.NotFound();
             }
 
-            var user = await adminService.CreateUserAsync(request, cancellationToken);
-            return Results.Ok(new
+            try
             {
-                user.Id,
-                user.DisplayName,
-                user.DefaultEmail,
-                user.IsActive,
-                user.CreatedAt,
-                user.UpdatedAt
-            });
+                var user = await adminService.CreateUserAsync(request, cancellationToken);
+                return Results.Ok(new
+                {
+                    user.Id,
+                    user.DisplayName,
+                    user.DefaultEmail,
+                    user.IsActive,
+                    user.CreatedAt,
+                    user.UpdatedAt
+                });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { message = ex.Message });
+            }
         });
 
         api.MapGet("/organizations", async (HttpContext context, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
