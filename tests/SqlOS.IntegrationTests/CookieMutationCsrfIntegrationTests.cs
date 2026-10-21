@@ -17,6 +17,7 @@ using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Configuration;
 using SqlOS.Extensions;
+using SqlOS.Fga.Models;
 using SqlOS.IntegrationTests.Infrastructure;
 using SqlOS.Security;
 using SqlOS.Services;
@@ -293,6 +294,100 @@ public sealed class CookieMutationCsrfIntegrationTests
         (await server.IsClientActiveAsync(clientId!)).Should().BeTrue();
     }
 
+    [DataTestMethod]
+    [DataRow("AuthorizationCallback", "Production")]
+    [DataRow("DevelopmentOnly", "Development")]
+    public async Task AmbientlyAuthorizedAdmin_WithoutTheRequestProof_WritesNothing(string mode, string environmentName)
+    {
+        await using var server = await CsrfServer.StartAsync(options =>
+        {
+            if (mode == "AuthorizationCallback")
+            {
+                // The host trusts something the browser sends on its own, such as a host cookie.
+                options.Dashboard.AuthorizationCallback = _ => Task.FromResult(true);
+            }
+        }, environmentName: environmentName);
+        var target = await server.SeedFgaGrantTargetAsync();
+        var disabled = await server.CreateClientAsync($"proof-{environmentName.ToLowerInvariant()}");
+        await server.DisableClientAsync(disabled.Id);
+        var activeKid = await server.ActiveSigningKeyKidAsync();
+        var grantJson = $$"""{"subjectId":"{{target.SubjectId}}","roleId":"{{target.RoleId}}","resourceId":"{{target.ResourceId}}"}""";
+
+        // A cross-site simple request: text/plain body, no header, no SqlOS cookie.
+        var forgedGrant = await server.SendAsync(
+            HttpMethod.Post,
+            "/sqlos/admin/fga/api/grants",
+            cookie: null,
+            SiblingOrigin,
+            csrfHeader: false,
+            new StringContent(grantJson, System.Text.Encoding.UTF8, "text/plain"));
+        await AssertRejectedAsync(forgedGrant, grantJson);
+
+        var crossSiteWithHeader = await server.SendAsync(
+            HttpMethod.Post,
+            "/sqlos/admin/fga/api/grants",
+            cookie: null,
+            SiblingOrigin,
+            csrfHeader: true,
+            new StringContent(grantJson, System.Text.Encoding.UTF8, "application/json"));
+        await AssertRejectedAsync(crossSiteWithHeader, grantJson);
+
+        var bodylessEnable = await server.SendAsync(
+            HttpMethod.Post,
+            $"/sqlos/admin/auth/api/clients/{disabled.Id}/enable",
+            cookie: null,
+            origin: null,
+            csrfHeader: false);
+        await AssertRejectedAsync(bodylessEnable, disabled.Id);
+
+        var bodylessRotate = await server.SendAsync(
+            HttpMethod.Post,
+            "/sqlos/admin/auth/api/signing-keys/rotate",
+            cookie: null,
+            SiblingOrigin,
+            csrfHeader: false);
+        await AssertRejectedAsync(bodylessRotate, activeKid);
+
+        (await server.CountGrantsAsync(target.SubjectId)).Should().Be(0, "{0}: no forged request wrote a grant", mode);
+        (await server.IsClientActiveAsync(disabled.Id)).Should().BeFalse();
+        (await server.ActiveSigningKeyKidAsync()).Should().Be(activeKid);
+        (await server.CountAuditAsync("client.enabled")).Should().Be(0);
+        (await server.CountAuditAsync(SqlOSCookieMutationCsrf.RejectionEventType)).Should().Be(4);
+
+        // The dashboard page itself: same origin, the header, and JSON.
+        var dashboardGrant = await server.SendAsync(
+            HttpMethod.Post,
+            "/sqlos/admin/fga/api/grants",
+            cookie: null,
+            TrustedOrigin,
+            csrfHeader: true,
+            new StringContent(grantJson, System.Text.Encoding.UTF8, "application/json"));
+        dashboardGrant.StatusCode.Should().Be(HttpStatusCode.Created, await dashboardGrant.Content.ReadAsStringAsync());
+        (await server.CountGrantsAsync(target.SubjectId)).Should().Be(1);
+
+        var dashboardEnable = await server.SendAsync(
+            HttpMethod.Post,
+            $"/sqlos/admin/auth/api/clients/{disabled.Id}/enable",
+            cookie: null,
+            TrustedOrigin,
+            csrfHeader: true);
+        dashboardEnable.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await server.IsClientActiveAsync(disabled.Id)).Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task UnauthorizedAdminRequest_IsHiddenWith404_WithOrWithoutTheProof()
+    {
+        await using var server = await CsrfServer.StartAsync(options =>
+            options.Dashboard.AuthorizationCallback = _ => Task.FromResult(false));
+
+        var withoutProof = await server.SendAsync(HttpMethod.Post, "/sqlos/admin/auth/api/signing-keys/rotate", null, SiblingOrigin, csrfHeader: false);
+        var withProof = await server.SendAsync(HttpMethod.Post, "/sqlos/admin/auth/api/signing-keys/rotate", null, TrustedOrigin, csrfHeader: true);
+
+        withoutProof.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        withProof.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
     private static async Task AssertRejectedAsync(HttpResponseMessage response, string secret)
     {
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
@@ -311,13 +406,14 @@ public sealed class CookieMutationCsrfIntegrationTests
 
         public static async Task<CsrfServer> StartAsync(
             Action<SqlOSOptions> configure,
-            bool? trustForwardedHost = null)
+            bool? trustForwardedHost = null,
+            string? environmentName = null)
         {
             await using var bootstrap = await AspireFixture.CreateIsolatedAuthContextAsync("CookieCsrf");
             var connectionString = bootstrap.Database.GetConnectionString()!;
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions
             {
-                EnvironmentName = Environments.Production
+                EnvironmentName = environmentName ?? Environments.Production
             });
             builder.WebHost.UseTestServer();
             builder.Services.AddDbContext<TestSqlOSDbContext>(database => database.UseTestProvider(connectionString));
@@ -436,6 +532,28 @@ public sealed class CookieMutationCsrfIntegrationTests
             return await Client.SendAsync(request);
         }
 
+        public async Task<FgaGrantTarget> SeedFgaGrantTargetAsync()
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+            var suffix = Guid.NewGuid().ToString("N")[..12];
+            var subjectType = new SqlOSFgaSubjectType { Id = $"st_{suffix}", Name = "Proof subjects" };
+            var resourceType = new SqlOSFgaResourceType { Id = $"rt_{suffix}", Name = "Proof resources" };
+            var subject = new SqlOSFgaSubject { Id = $"sub_{suffix}", SubjectTypeId = subjectType.Id, DisplayName = "Attacker" };
+            var role = new SqlOSFgaRole { Id = $"role_{suffix}", Key = $"admin-{suffix}", Name = "Admin" };
+            var resource = new SqlOSFgaResource { Id = $"res_{suffix}", ResourceTypeId = resourceType.Id, Name = "Root", IsActive = true };
+            context.AddRange(subjectType, resourceType, subject, role, resource);
+            await context.SaveChangesAsync();
+            return new FgaGrantTarget(subject.Id, role.Id, resource.Id);
+        }
+
+        public async Task<int> CountGrantsAsync(string subjectId)
+        {
+            await using var scope = App.Services.CreateAsyncScope();
+            var context = scope.ServiceProvider.GetRequiredService<TestSqlOSDbContext>();
+            return await context.Set<SqlOSFgaGrant>().AsNoTracking().CountAsync(grant => grant.SubjectId == subjectId);
+        }
+
         public async Task<bool> IsClientActiveAsync(string clientApplicationId)
         {
             await using var scope = App.Services.CreateAsyncScope();
@@ -533,6 +651,8 @@ public sealed class CookieMutationCsrfIntegrationTests
     }
 
     private sealed record PortalSession(string SessionId, string Cookie, string RawToken);
+
+    private sealed record FgaGrantTarget(string SubjectId, string RoleId, string ResourceId);
 
     private sealed class FixedRemoteIpStartupFilter(IPAddress remoteIp) : IStartupFilter
     {

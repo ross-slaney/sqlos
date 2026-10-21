@@ -132,8 +132,23 @@ public class SqlOSFgaDashboardMiddleware
 
     private async Task HandleApiRequest(HttpContext context, string endpoint)
     {
-        if (await SqlOSCookieMutationCsrf.RejectIfRequiredAsync(context))
+        if (await SqlOSCookieMutationCsrf.RejectIfRequiredAsync(context, SqlOSMutationCsrfScope.Admin))
         {
+            return;
+        }
+
+        // Every FGA mutation with a body is JSON. Rejecting other media types before the body is
+        // read keeps a text/plain "simple request" from ever reaching a handler.
+        if ((HttpMethods.IsPost(context.Request.Method)
+                || HttpMethods.IsPut(context.Request.Method)
+                || HttpMethods.IsPatch(context.Request.Method))
+            && !context.Request.HasJsonContentType())
+        {
+            context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(
+                new { error = "unsupported_media_type", message = "Send the request body as application/json." },
+                JsonOptions));
             return;
         }
 

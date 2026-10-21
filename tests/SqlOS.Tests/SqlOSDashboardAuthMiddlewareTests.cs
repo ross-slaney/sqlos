@@ -233,6 +233,20 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
     }
 
     [TestMethod]
+    public async Task DashboardLogout_WithoutTheRequestProof_IsRejectedAndNotAudited()
+    {
+        using var harness = CreateHarness();
+
+        var response = await harness.PostLogoutAsync("203.0.113.51", dashboardRequestProof: false);
+
+        response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        response.Body.Should().Contain("csrf_rejected");
+        var auditEvents = await harness.ListAuditEventsAsync();
+        auditEvents.Should().NotContain(x => x.EventType == "dashboard.logout");
+        auditEvents.Should().ContainSingle(x => x.EventType == SqlOSCookieMutationCsrf.RejectionEventType);
+    }
+
+    [TestMethod]
     public async Task DashboardShell_ExposesScimCapability()
     {
         using var disabledHarness = CreateHarness(options =>
@@ -549,8 +563,9 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
                 $$"""{"password":"{{password}}"}""",
                 ipAddress);
 
-        public Task<DashboardResponse> PostLogoutAsync(string ipAddress)
-            => SendAsync(HttpMethods.Post, "/sqlos/dashboard-auth/logout", null, ipAddress);
+        /// <summary>Posts logout the way the dashboard page does: same origin, with the request header.</summary>
+        public Task<DashboardResponse> PostLogoutAsync(string ipAddress, bool dashboardRequestProof = true)
+            => SendAsync(HttpMethods.Post, "/sqlos/dashboard-auth/logout", null, ipAddress, dashboardRequestProof: dashboardRequestProof);
 
         public Task<DashboardResponse> GetDashboardAsync(string? cookieHeader = null)
             => SendAsync(HttpMethods.Get, "/sqlos/admin/auth/organizations", null, "203.0.113.60", cookieHeader: cookieHeader);
@@ -576,7 +591,8 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             string? body,
             string ipAddress,
             string? queryString = null,
-            string? cookieHeader = null)
+            string? cookieHeader = null,
+            bool dashboardRequestProof = false)
         {
             using var scope = _services.CreateScope();
             var context = new DefaultHttpContext
@@ -595,6 +611,13 @@ public sealed class SqlOSDashboardAuthMiddlewareTests
             if (cookieHeader != null)
             {
                 context.Request.Headers.Cookie = cookieHeader;
+            }
+
+            if (dashboardRequestProof)
+            {
+                context.Request.Host = new HostString("dashboard.test");
+                context.Request.Headers.Origin = "https://dashboard.test";
+                context.Request.Headers[SqlOSCookieMutationCsrf.HeaderName] = SqlOSCookieMutationCsrf.HeaderValue;
             }
 
             if (body != null)

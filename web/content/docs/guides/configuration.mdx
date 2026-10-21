@@ -201,7 +201,11 @@ For local development, `dotnet user-secrets set "SqlOS:Dashboard:Password" "..."
 
 Treat `/sqlos` and `/sqlos/admin` as administrative endpoints — restrict network access in production.
 
-Password-mode dashboard mutations and SSO-portal mutations that present their session cookie also require a same-origin browser proof: the `X-SqlOS-Request: 1` header plus an `Origin` or `Referer` that matches `AuthServer.PublicOrigin`, the issuer origin, or the request host after trusted forwarded headers. The hosted dashboard and SSO setup portal send that header themselves and do not store it in browser storage. A missing, conflicting, or cross-origin value is rejected before the mutation or its success audit is committed. Calls that authenticate with a bearer token or `Dashboard.AuthorizationCallback` and do not send either session cookie are unchanged.
+Every unsafe (`POST`, `PUT`, `PATCH`, `DELETE`) request to a dashboard, admin API, or FGA dashboard route, other than the password-mode dashboard login itself, requires a same-origin browser proof, whatever `Dashboard.AuthMode` is: the `X-SqlOS-Request: 1` header plus an `Origin` or `Referer` that matches `AuthServer.PublicOrigin`, the issuer origin, or the request host after trusted forwarded headers. This applies when a `Dashboard.AuthorizationCallback` or `DevelopmentOnly` mode authorizes the request, because a callback that trusts a host cookie, SSO or proxy headers, or the network a request came from is trusting something the browser sends on its own. The one exception is a request with an `Authorization: Bearer` header and no SqlOS session cookie, which a browser cannot attach to a cross-site request. SSO-portal mutations require the proof only when they present the portal session cookie.
+
+The hosted dashboard, FGA dashboard, and SSO setup portal send the header themselves and do not store it in browser storage. A missing, conflicting, or cross-origin value is rejected with `403 csrf_rejected` before the mutation or its success audit is committed. A caller that is not authorized still receives the usual `404`. FGA dashboard mutations with a body must also be sent as `application/json`; any other content type is rejected with `415` before the body is read.
+
+If you script these routes with credentials other than a bearer token (a host cookie, an API key header your callback checks, or network location), send the proof too: `-H 'X-SqlOS-Request: 1' -H 'Origin: https://your-sqlos-host'`.
 
 ## Hosted UI security headers
 

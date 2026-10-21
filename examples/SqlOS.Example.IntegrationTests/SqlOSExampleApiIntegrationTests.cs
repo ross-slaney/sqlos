@@ -1214,7 +1214,7 @@ public sealed class SqlOSExampleApiIntegrationTests
         var client = factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
-        });
+        }).WithDashboardRequestProof();
         var sender = factory.Services.GetRequiredService<CapturingTransactionalEmailSender>();
 
         var userResponse = await client.PostAsJsonAsync("/sqlos/admin/auth/api/users", new

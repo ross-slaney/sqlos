@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -91,6 +92,47 @@ public sealed class SqlOSCookieMutationCsrfTests
     }
 
     [TestMethod]
+    public void DashboardJavascript_EveryMutatingFetchSendsTheRequestHeader()
+    {
+        var root = FindRepositoryRoot();
+        foreach (var relative in new[]
+        {
+            Path.Combine("src", "SqlOS", "Dashboard", "wwwroot", "app.js"),
+            Path.Combine("src", "SqlOS", "Fga", "Dashboard", "wwwroot", "app.js")
+        })
+        {
+            var source = File.ReadAllText(Path.Combine(root, relative));
+            source.Should().NotContain("XMLHttpRequest", "{0} sends every request through fetch", relative);
+            source.Should().NotContain("sendBeacon", "{0} sends every request through fetch", relative);
+
+            var calls = FetchCalls(source).ToArray();
+            calls.Should().NotBeEmpty(relative);
+            foreach (var call in calls)
+            {
+                // The main dashboard funnels every call through fetchJson, which sets the header
+                // after spreading caller headers so no caller can drop it. The FGA dashboard sets
+                // it on each mutating call.
+                var mutating = Regex.IsMatch(call, @"method:\s*['""](POST|PUT|PATCH|DELETE)['""]")
+                    || call.Contains("...requestOptions", StringComparison.Ordinal);
+                if (!mutating)
+                {
+                    continue;
+                }
+
+                call.Should().MatchRegex(
+                    @"['""]X-SqlOS-Request['""]\s*:\s*['""]1['""]",
+                    "{0}: a mutating fetch must send the request header: {1}", relative, call);
+                if (call.Contains("...requestOptions", StringComparison.Ordinal))
+                {
+                    call.LastIndexOf("X-SqlOS-Request", StringComparison.Ordinal).Should().BeGreaterThan(
+                        call.LastIndexOf("...(requestOptions.headers", StringComparison.Ordinal),
+                        "caller headers must not be able to override the request header");
+                }
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task Evaluate_RejectsSiblingOriginAndAmbiguousSource_AndIgnoresRawForwardedHost()
     {
         var hostile = await EvaluateAsync(request =>
@@ -177,10 +219,73 @@ public sealed class SqlOSCookieMutationCsrfTests
         body.Should().Be("{\"error\":\"csrf_rejected\",\"message\":\"The request could not be verified.\"}");
     }
 
+    [DataTestMethod]
+    // Admin and FGA dashboard requests: the session cookie is not the only ambient credential.
+    [DataRow(false, false, null, null, false, "missing_header", DisplayName = "admin: no cookie, no header, no origin")]
+    [DataRow(false, false, SiblingOrigin, null, false, "missing_header", DisplayName = "admin: no cookie, no header, cross-site")]
+    [DataRow(false, false, TrustedOrigin, null, false, "missing_header", DisplayName = "admin: no cookie, no header, same origin")]
+    [DataRow(false, true, SiblingOrigin, null, false, "untrusted_origin", DisplayName = "admin: no cookie, header, cross-site")]
+    [DataRow(false, true, null, null, false, "untrusted_origin", DisplayName = "admin: no cookie, header, no origin")]
+    [DataRow(false, true, TrustedOrigin, null, true, "", DisplayName = "admin: no cookie, header, same origin")]
+    [DataRow(false, false, null, "Bearer token-value", true, "", DisplayName = "admin: bearer without cookie")]
+    [DataRow(false, false, SiblingOrigin, "Bearer token-value", true, "", DisplayName = "admin: bearer, cross-site origin")]
+    [DataRow(false, false, SiblingOrigin, "Bearer ", false, "missing_header", DisplayName = "admin: empty bearer")]
+    [DataRow(false, false, SiblingOrigin, "Basic dXNlcjpwYXNz", false, "missing_header", DisplayName = "admin: basic credentials")]
+    [DataRow(true, false, TrustedOrigin, "Bearer token-value", false, "missing_header", DisplayName = "admin: bearer with session cookie")]
+    [DataRow(true, false, TrustedOrigin, null, false, "missing_header", DisplayName = "admin: cookie, no header")]
+    [DataRow(true, true, SiblingOrigin, null, false, "untrusted_origin", DisplayName = "admin: cookie, header, cross-site")]
+    [DataRow(true, true, TrustedOrigin, null, true, "", DisplayName = "admin: cookie, header, same origin")]
+    public async Task Evaluate_AdminScope_RequiresTheProofWithoutACookieUnlessBearer(
+        bool includeCookie,
+        bool includeHeader,
+        string? origin,
+        string? authorization,
+        bool allowed,
+        string reason)
+    {
+        var decision = await EvaluateAsync(request =>
+        {
+            if (includeHeader)
+            {
+                request.Headers[SqlOSCookieMutationCsrf.HeaderName] = SqlOSCookieMutationCsrf.HeaderValue;
+            }
+
+            if (origin != null)
+            {
+                request.Headers.Origin = origin;
+            }
+
+            if (authorization != null)
+            {
+                request.Headers.Authorization = authorization;
+            }
+        }, includeCookie, scope: SqlOSMutationCsrfScope.Admin);
+
+        decision.IsAllowed.Should().Be(allowed);
+        decision.Reason.Should().Be(reason);
+    }
+
+    [TestMethod]
+    public async Task Evaluate_SafeMethodsAndTheSessionCookieScope_KeepTheirRules()
+    {
+        (await EvaluateAsync(request => request.Headers.Origin = SiblingOrigin, includeCookie: false, method: HttpMethods.Get, scope: SqlOSMutationCsrfScope.Admin))
+            .IsAllowed.Should().BeTrue("reads never need the proof");
+        (await EvaluateAsync(request => request.Headers.Origin = SiblingOrigin, includeCookie: false, scope: SqlOSMutationCsrfScope.SessionCookie))
+            .IsAllowed.Should().BeTrue("the SSO portal keeps its cookie-scoped rule");
+        (await EvaluateAsync(request => request.Headers.Origin = TrustedOrigin, includeCookie: true, scope: SqlOSMutationCsrfScope.SessionCookie))
+            .Reason.Should().Be("missing_header");
+        foreach (var method in new[] { HttpMethods.Put, HttpMethods.Patch, HttpMethods.Delete })
+        {
+            (await EvaluateAsync(request => request.Headers.Origin = TrustedOrigin, includeCookie: false, method: method, scope: SqlOSMutationCsrfScope.Admin))
+                .Reason.Should().Be("missing_header", "{0} is unsafe", method);
+        }
+    }
+
     private static async Task<SqlOSCookieMutationCsrfDecision> EvaluateAsync(
         Action<HttpRequest> configure,
         bool includeCookie = true,
-        string method = "POST")
+        string method = "POST",
+        SqlOSMutationCsrfScope scope = SqlOSMutationCsrfScope.SessionCookie)
     {
         var services = new ServiceCollection();
         services.AddSingleton(Options.Create(new SqlOSAuthServerOptions
@@ -199,7 +304,25 @@ public sealed class SqlOSCookieMutationCsrfTests
         }
 
         configure(context.Request);
-        return SqlOSCookieMutationCsrf.Evaluate(context);
+        return SqlOSCookieMutationCsrf.Evaluate(context, scope);
+    }
+
+    /// <summary>Returns the argument text of every <c>fetch(...)</c> call.</summary>
+    private static IEnumerable<string> FetchCalls(string source)
+    {
+        foreach (Match match in Regex.Matches(source, @"\bfetch\("))
+        {
+            var depth = 0;
+            for (var index = match.Index + match.Length - 1; index < source.Length; index++)
+            {
+                depth += source[index] switch { '(' => 1, ')' => -1, _ => 0 };
+                if (depth == 0)
+                {
+                    yield return source[(match.Index + match.Length)..index];
+                    break;
+                }
+            }
+        }
     }
 
     private static bool IsUnsafe(RouteEndpoint endpoint)

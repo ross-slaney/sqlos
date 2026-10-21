@@ -33,7 +33,7 @@ public sealed class SqlOSCalendarEndpointsTests
     public async Task AdminEndpoints_InDevelopment_ServeSummaryListDetailAndActions()
     {
         using var host = await StartHostAsync("Development");
-        var client = host.GetTestClient();
+        var client = host.GetTestClient().WithDashboardRequestProof();
         var connectionId = await SeedConnectionAsync(host, SqlOSCalendarIntegrationMode.ReadPull);
 
         var summary = await client.GetAsync("/sqlos/admin/calendar/api/summary");
@@ -70,7 +70,7 @@ public sealed class SqlOSCalendarEndpointsTests
     public async Task AdminEndpoints_SyncOnConnectionOnly_ReturnsBadRequest()
     {
         using var host = await StartHostAsync("Development");
-        var client = host.GetTestClient();
+        var client = host.GetTestClient().WithDashboardRequestProof();
         var connectionId = await SeedConnectionAsync(host, SqlOSCalendarIntegrationMode.ConnectionOnly);
 
         var sync = await client.PostAsync($"/sqlos/admin/calendar/api/connections/{connectionId}/sync", content: null);
@@ -83,7 +83,7 @@ public sealed class SqlOSCalendarEndpointsTests
     public async Task AdminEndpoints_OutsideDevelopment_AreHiddenWith404()
     {
         using var host = await StartHostAsync("Production");
-        var client = host.GetTestClient();
+        var client = host.GetTestClient().WithDashboardRequestProof();
         var connectionId = await SeedConnectionAsync(host, SqlOSCalendarIntegrationMode.ReadPull);
 
         (await client.GetAsync("/sqlos/admin/calendar/api/summary")).StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -98,7 +98,7 @@ public sealed class SqlOSCalendarEndpointsTests
     public async Task ConnectCallbackEndpoint_CompletesFlowAndRedirects()
     {
         using var host = await StartHostAsync("Development");
-        var client = host.GetTestClient();
+        var client = host.GetTestClient().WithDashboardRequestProof();
 
         string authorizationUrl;
         using (var scope = host.Services.CreateScope())
@@ -130,7 +130,7 @@ public sealed class SqlOSCalendarEndpointsTests
     public async Task ConnectCallbackEndpoint_MissingState_RendersErrorPage()
     {
         using var host = await StartHostAsync("Development");
-        var client = host.GetTestClient();
+        var client = host.GetTestClient().WithDashboardRequestProof();
 
         var callback = await client.GetAsync("/sqlos/auth/calendar/callback?code=success:missing@example.com");
 

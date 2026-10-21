@@ -164,7 +164,7 @@ public sealed class SqlOSDashboardMiddleware
         if (endpoint.Equals("logout", StringComparison.OrdinalIgnoreCase)
             && HttpMethods.IsPost(context.Request.Method))
         {
-            if (await SqlOSCookieMutationCsrf.RejectIfRequiredAsync(context))
+            if (await SqlOSCookieMutationCsrf.RejectIfRequiredAsync(context, SqlOSMutationCsrfScope.Admin))
             {
                 return;
             }

@@ -127,6 +127,82 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
         (await harness.CountGrantsAsync()).Should().Be(1);
     }
 
+    public static IEnumerable<object[]> AmbientlyAuthorizedModes()
+    {
+        yield return ["DevelopmentOnly", "Development", false];
+        yield return ["Callback", "Production", true];
+    }
+
+    [DataTestMethod]
+    [DynamicData(nameof(AmbientlyAuthorizedModes), DynamicDataSourceType.Method)]
+    public async Task GrantCreate_AuthorizedWithoutACookie_RequiresTheRequestProofAndJson(
+        string mode,
+        string environmentName,
+        bool useCallback)
+    {
+        var dashboard = new SqlOSDashboardOptions { AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly };
+        if (useCallback)
+        {
+            // The host trusts something the browser sends on its own, such as a host cookie.
+            dashboard.AuthorizationCallback = _ => Task.FromResult(true);
+        }
+
+        await using var harness = await FgaDashboardHarness.CreateAsync(dashboard, environmentName);
+        const string grant = """{"subjectId":"user-1","roleId":"admin","resourceId":"root"}""";
+
+        // A cross-site simple request: text/plain, no header, no SqlOS cookie.
+        var forged = await harness.SendAsync(
+            HttpMethods.Post, "/sqlos/admin/fga/api/grants", grant,
+            origin: "https://evil.example.test", csrfHeader: false, contentType: "text/plain");
+        forged.StatusCode.Should().Be(StatusCodes.Status403Forbidden, mode);
+        forged.Body.Should().Contain("csrf_rejected");
+
+        var crossSiteWithHeader = await harness.SendAsync(
+            HttpMethods.Post, "/sqlos/admin/fga/api/grants", grant,
+            origin: "https://evil.example.test", csrfHeader: true);
+        crossSiteWithHeader.StatusCode.Should().Be(StatusCodes.Status403Forbidden, mode);
+
+        var bodylessDelete = await harness.SendAsync(
+            HttpMethods.Delete, "/sqlos/admin/fga/api/grants/missing", origin: null, csrfHeader: false);
+        bodylessDelete.StatusCode.Should().Be(StatusCodes.Status403Forbidden, mode);
+
+        var notJson = await harness.SendAsync(
+            HttpMethods.Post, "/sqlos/admin/fga/api/grants", grant, contentType: "text/plain");
+        notJson.StatusCode.Should().Be(StatusCodes.Status415UnsupportedMediaType, mode);
+        notJson.Body.Should().Contain("unsupported_media_type");
+
+        (await harness.CountGrantsAsync()).Should().Be(0, "{0}: no rejected request wrote a grant", mode);
+
+        // The dashboard page itself: same origin, header, JSON.
+        var fromDashboard = await harness.SendAsync(HttpMethods.Post, "/sqlos/admin/fga/api/grants", grant);
+        fromDashboard.StatusCode.Should().Be(StatusCodes.Status201Created, mode);
+        (await harness.CountGrantsAsync()).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task GrantCreate_WithABearerHeaderAndNoCookie_SkipsTheBrowserProof()
+    {
+        await using var harness = await FgaDashboardHarness.CreateAsync(
+            new SqlOSDashboardOptions
+            {
+                AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly,
+                AuthorizationCallback = context => Task.FromResult(
+                    context.Request.Headers.Authorization.ToString() == "Bearer operator-token")
+            },
+            "Production");
+
+        var created = await harness.SendAsync(
+            HttpMethods.Post,
+            "/sqlos/admin/fga/api/grants",
+            """{"subjectId":"user-1","roleId":"admin","resourceId":"root"}""",
+            origin: null,
+            csrfHeader: false,
+            authorization: "Bearer operator-token");
+
+        created.StatusCode.Should().Be(StatusCodes.Status201Created);
+        (await harness.CountGrantsAsync()).Should().Be(1);
+    }
+
     private static async Task AssertSchemaWriteRejectedAsync(FgaDashboardResponse response)
     {
         response.StatusCode.Should().Be(StatusCodes.Status405MethodNotAllowed);
@@ -146,7 +222,9 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
             _middleware = middleware;
         }
 
-        public static async Task<FgaDashboardHarness> CreateAsync()
+        public static async Task<FgaDashboardHarness> CreateAsync(
+            SqlOSDashboardOptions? dashboard = null,
+            string environmentName = "Development")
         {
             var services = new ServiceCollection();
             var databaseName = Guid.NewGuid().ToString("N");
@@ -190,8 +268,8 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
             var middleware = new SqlOSFgaDashboardMiddleware(
                 _ => Task.CompletedTask,
                 "/sqlos/admin/fga",
-                new TestHostEnvironment { EnvironmentName = Environments.Development },
-                new SqlOSDashboardOptions { AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly },
+                new TestHostEnvironment { EnvironmentName = environmentName },
+                dashboard ?? new SqlOSDashboardOptions { AuthMode = SqlOSDashboardAuthMode.DevelopmentOnly },
                 provider.GetRequiredService<SqlOSDashboardSessionService>(),
                 Options.Create(new SqlOSOptions()));
 
@@ -203,8 +281,10 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
             string path,
             string? body = null,
             string? cookie = null,
-            string? origin = null,
-            bool csrfHeader = false)
+            string? origin = "https://localhost",
+            bool csrfHeader = true,
+            string contentType = "application/json",
+            string? authorization = null)
         {
             await using var scope = _services.CreateAsyncScope();
             var context = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
@@ -229,12 +309,17 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
                 context.Request.Headers["X-SqlOS-Request"] = "1";
             }
 
+            if (authorization != null)
+            {
+                context.Request.Headers.Authorization = authorization;
+            }
+
             if (body != null)
             {
                 var bytes = Encoding.UTF8.GetBytes(body);
                 context.Request.Body = new MemoryStream(bytes);
                 context.Request.ContentLength = bytes.Length;
-                context.Request.ContentType = "application/json";
+                context.Request.ContentType = contentType;
             }
 
             await _middleware.InvokeAsync(context);
