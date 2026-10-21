@@ -505,6 +505,8 @@ public sealed class HeadlessAuthIntegrationTests
         (await fixture.Context.Set<SqlOSOrganization>().CountAsync(x => x.Name == organizationName)).Should().Be(0);
         (await fixture.Context.Set<SqlOSAuthorizationCode>().CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id)).Should().Be(0);
         (await fixture.Context.Set<SqlOSEmailOtpChallenge>().AsNoTracking().SingleAsync(x => x.Email == email)).ConsumedAt.Should().BeNull();
+        (await fixture.Context.Set<SqlOSTemporaryToken>().AsNoTracking().SingleAsync(x => x.Purpose == "email_otp_signup"))
+            .ConsumedAt.Should().BeNull("the account transaction must also release its early signup-token claim");
     }
 
     [TestMethod]
