@@ -31,6 +31,7 @@ public static class SqlOSPublicAuthErrorMapper
         "Email address is required.",
         "Email must be verified before password login.",
         "Email sign-in is unavailable.",
+        SqlOSEmailAddress.InvalidEmailMessage,
         "Invitation is invalid or expired.",
         "Invitation signup without a password requires Email OTP to be enabled.",
         "Local password authentication is disabled.",

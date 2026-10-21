@@ -548,7 +548,7 @@ public sealed partial class SqlOSAdminService
 
     public async Task<SqlOSUser> CreateUserAsync(SqlOSCreateUserRequest request, CancellationToken cancellationToken = default)
     {
-        if (!SqlOSEmailAddress.TryCanonicalize(request.Email, out var address, out var normalizedEmail))
+        if (!SqlOSEmailAddress.TryCanonicalizeSubmitted(request.Email, out var address, out var normalizedEmail))
         {
             throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
         }

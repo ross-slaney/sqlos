@@ -1072,7 +1072,7 @@
         if (text === null || text === undefined || text === "" || text === "n/a") {
             return "";
         }
-        const cls = tone ? `chip chip-${tone}` : "chip";
+        const cls = tone ? `chip chip-${esc(tone)}` : "chip";
         return `<span class="${cls}">${esc(String(text))}</span>`;
     }
 
@@ -1090,7 +1090,7 @@
             <${tag} class="list-row${href ? " list-row-link" : ""}"${hrefAttr}>
                 <div class="list-row-main">
                     <div class="list-row-title">${esc(title)}</div>
-                    ${subtitle ? `<div class="list-row-sub">${subtitle}</div>` : ""}
+                    ${subtitle ? `<div class="list-row-sub">${esc(subtitle)}</div>` : ""}
                 </div>
                 <div class="list-row-meta">${metaHtml || ""}</div>
                 ${actionsHtml || (href ? `<span class="list-row-chevron" aria-hidden="true">›</span>` : "")}
