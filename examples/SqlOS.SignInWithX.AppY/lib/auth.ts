@@ -7,7 +7,7 @@ import type { AuthOptions } from "next-auth";
 // First-party hosted JS examples use this same Auth.js shape (see
 // examples/SqlOS.Example.Web/lib/auth.ts) plus offline_access for API tokens.
 const issuer = process.env.SQLOS_ISSUER ?? "http://localhost:5100/sqlos/auth";
-const clientId = process.env.SQLOS_CLIENT_ID ?? "app-y";
+export const clientId = process.env.SQLOS_CLIENT_ID ?? "app-y";
 
 export const authOptions: AuthOptions = {
   providers: [

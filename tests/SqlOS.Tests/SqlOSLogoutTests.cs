@@ -48,6 +48,115 @@ public sealed class SqlOSLogoutTests
     }
 
     [TestMethod]
+    [DataRow("dcr", "dcr_attacker")]
+    [DataRow("cimd", "https://evil.example.test/client.json")]
+    public async Task ResolvePostLogoutRedirectAsync_IgnoresDynamicallyRegisteredClientOrigins(
+        string registrationSource,
+        string clientId)
+    {
+        var fixture = await CreateLogoutFixtureAsync();
+        await AddDynamicClientAsync(fixture.Context, clientId, registrationSource, "https://evil.example.test/cb");
+
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://evil.example.test/login"))
+            .Should().BeNull();
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://evil.example.test/login", clientId))
+            .Should().BeNull("an unauthenticated client_id must not re-enable a dynamic client's origin");
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "/settings", clientId))
+            .Should().Be("/settings");
+    }
+
+    [TestMethod]
+    public async Task ResolvePostLogoutRedirectAsync_AllowsActiveAdminCreatedClientOrigin()
+    {
+        var fixture = await CreateLogoutFixtureAsync();
+        await fixture.Admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            "dashboard-web",
+            "Dashboard Web",
+            "sqlos",
+            ["https://dashboard-app.example.test/callback"]));
+
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://dashboard-app.example.test/bye"))
+            .Should().Be("https://dashboard-app.example.test/bye");
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://dashboard-app.example.test/bye", "dashboard-web"))
+            .Should().Be("https://dashboard-app.example.test/bye");
+    }
+
+    [TestMethod]
+    public async Task ResolvePostLogoutRedirectAsync_StopsHonoringDisabledClientOrigin_UntilReEnabled()
+    {
+        var fixture = await CreateLogoutFixtureAsync();
+        var dashboardClient = await fixture.Admin.CreateClientAsync(new SqlOSCreateClientRequest(
+            "dashboard-web",
+            "Dashboard Web",
+            "sqlos",
+            ["https://dashboard-app.example.test/callback"]));
+        var seededClient = await fixture.Context.Set<SqlOSClientApplication>().SingleAsync(x => x.ClientId == "example-web");
+
+        await fixture.Admin.DisableClientAsync(dashboardClient.Id, "test");
+        await fixture.Admin.EmergencyDisableClientAsync(seededClient.Id);
+        foreach (var (url, clientId) in new[]
+        {
+            ("https://dashboard-app.example.test/bye", (string?)null),
+            ("https://dashboard-app.example.test/bye", "dashboard-web"),
+            ("https://app.example.test/signed-out", null),
+            ("https://app.example.test/signed-out", "example-web")
+        })
+        {
+            (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, url, clientId))
+                .Should().BeNull("{0} belongs to a disabled client", url);
+        }
+
+        await fixture.Admin.EnableClientAsync(dashboardClient.Id);
+        await fixture.Admin.EmergencyEnableClientAsync(seededClient.Id);
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://dashboard-app.example.test/bye"))
+            .Should().Be("https://dashboard-app.example.test/bye");
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://app.example.test/signed-out"))
+            .Should().Be("https://app.example.test/signed-out");
+    }
+
+    [TestMethod]
+    public async Task ResolvePostLogoutRedirectAsync_IgnoresInactiveClientOrigin()
+    {
+        var fixture = await CreateLogoutFixtureAsync();
+        var client = await fixture.Context.Set<SqlOSClientApplication>().SingleAsync(x => x.ClientId == "example-web");
+        client.IsActive = false;
+        await fixture.Context.SaveChangesAsync();
+
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://app.example.test/signed-out"))
+            .Should().BeNull();
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://app.example.test/signed-out", "example-web"))
+            .Should().BeNull();
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://other.example.test/signed-out"))
+            .Should().Be("https://other.example.test/signed-out");
+    }
+
+    [TestMethod]
+    public async Task ResolvePostLogoutRedirectAsync_ScopesExternalOriginsToNamedClient()
+    {
+        var fixture = await CreateLogoutFixtureAsync();
+
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://app.example.test/signed-out", "example-web"))
+            .Should().Be("https://app.example.test/signed-out");
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://other.example.test/signed-out", "example-web"))
+            .Should().BeNull();
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://other.example.test/signed-out", "other-web"))
+            .Should().Be("https://other.example.test/signed-out");
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://auth.example.test/home", "example-web"))
+            .Should().Be("https://auth.example.test/home");
+    }
+
+    [TestMethod]
+    public async Task ResolvePostLogoutRedirectAsync_UnknownClientId_AllowsNoExternalOrigin()
+    {
+        var fixture = await CreateLogoutFixtureAsync();
+
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "https://app.example.test/signed-out", "missing-client"))
+            .Should().BeNull();
+        (await fixture.Service.ResolvePostLogoutRedirectAsync(fixture.HttpContext, "/settings", "missing-client"))
+            .Should().Be("/settings");
+    }
+
+    [TestMethod]
     [DataRow("/")]
     [DataRow("/settings")]
     [DataRow("/settings?tab=sessions")]
@@ -333,6 +442,24 @@ public sealed class SqlOSLogoutTests
     }
 
     [TestMethod]
+    public async Task LogoutEndpoint_ClientIdScopesExternalOrigin()
+    {
+        using var host = await StartLogoutHostAsync();
+        var client = host.GetTestClient();
+
+        using var allowed = await client.GetAsync(
+            "/sqlos/auth/logout?client_id=example-web&returnTo=" + Uri.EscapeDataString("https://app.example.test/signed-out"));
+        allowed.Headers.Location.Should().Be(new Uri("https://app.example.test/signed-out"));
+
+        using var unknown = await client.GetAsync(
+            "/sqlos/auth/logout?client_id=missing-client&returnTo=" + Uri.EscapeDataString("https://app.example.test/signed-out"));
+        unknown.Headers.Location.Should().Be(new Uri("/sqlos/auth/logged-out", UriKind.Relative));
+
+        using var local = await client.GetAsync("/sqlos/auth/logout?client_id=missing-client&returnTo=/settings");
+        local.Headers.Location.Should().Be(new Uri("/settings", UriKind.Relative));
+    }
+
+    [TestMethod]
     public async Task LogoutEndpoint_PrefersReturnTo_OverPostLogoutRedirectUri()
     {
         using var host = await StartLogoutHostAsync();
@@ -369,6 +496,18 @@ public sealed class SqlOSLogoutTests
 
     private static async Task<(SqlOSAuthorizationServerService Service, DefaultHttpContext HttpContext)> CreateAuthorizationServerAsync()
     {
+        var fixture = await CreateLogoutFixtureAsync();
+        return (fixture.Service, fixture.HttpContext);
+    }
+
+    private sealed record LogoutFixture(
+        TestSqlOSInMemoryDbContext Context,
+        SqlOSAdminService Admin,
+        SqlOSAuthorizationServerService Service,
+        DefaultHttpContext HttpContext);
+
+    private static async Task<LogoutFixture> CreateLogoutFixtureAsync()
+    {
         var context = CreateContext();
         var authOptions = new SqlOSAuthServerOptions
         {
@@ -376,6 +515,7 @@ public sealed class SqlOSLogoutTests
             PublicOrigin = "https://auth.example.test"
         };
         authOptions.SeedBrowserClient("example-web", "Example Web", "https://app.example.test/auth/callback");
+        authOptions.SeedBrowserClient("other-web", "Other Web", "https://other.example.test/auth/callback");
         var options = Options.Create(authOptions);
         var crypto = TestCryptoService.Create(context, options);
         var admin = new SqlOSAdminService(context, options, crypto);
@@ -399,7 +539,30 @@ public sealed class SqlOSLogoutTests
         var httpContext = new DefaultHttpContext();
         httpContext.Request.Scheme = "https";
         httpContext.Request.Host = new HostString("auth.example.test");
-        return (authorizationServerService, httpContext);
+        return new LogoutFixture(context, admin, authorizationServerService, httpContext);
+    }
+
+    private static async Task<SqlOSClientApplication> AddDynamicClientAsync(
+        TestSqlOSInMemoryDbContext context,
+        string clientId,
+        string registrationSource,
+        string redirectUri)
+    {
+        var client = new SqlOSClientApplication
+        {
+            Id = $"cli_{Guid.NewGuid():N}",
+            ClientId = clientId,
+            Name = clientId,
+            RegistrationSource = registrationSource,
+            ConfigurationOwner = "dynamic",
+            MetadataDocumentUrl = registrationSource == "cimd" ? clientId : null,
+            RedirectUrisJson = $"[\"{redirectUri}\"]",
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+        context.Set<SqlOSClientApplication>().Add(client);
+        await context.SaveChangesAsync();
+        return client;
     }
 
     private static async Task<IHost> StartLogoutHostAsync()

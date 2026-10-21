@@ -105,9 +105,13 @@ The subtlety worth keeping: SqlOS follows OIDC Core §5.4 and releases `name`/`e
 
 ```ts
 await signOut({ redirect: false });                          // end the RP session
-window.location.href =
-  `https://x.example.com/sqlos/auth/logout?returnTo=${encodeURIComponent(window.location.origin)}`;
+const logoutUrl = new URL("https://x.example.com/sqlos/auth/logout");
+logoutUrl.searchParams.set("returnTo", window.location.origin);
+logoutUrl.searchParams.set("client_id", "app-y");            // scope returnTo to App Y's origins
+window.location.href = logoutUrl.toString();
 ```
+
+X honors `returnTo` only for an origin from an active client X's operator registered (seeded, Admin API, or dashboard). `client_id` limits it to that client's own redirect-URI origins.
 
 Spec-shaped RP-initiated logout (`end_session_endpoint`) is tracked as issue #266; this pattern is the supported equivalent today.
 

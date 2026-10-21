@@ -1,5 +1,5 @@
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { authOptions, clientId } from "@/lib/auth";
 import { SignInWithX, SignOut } from "./auth-buttons";
 
 export default async function Home() {
@@ -52,7 +52,7 @@ export default async function Home() {
         </tbody>
       </table>
       <p>
-        <SignOut />
+        <SignOut clientId={clientId} />
       </p>
     </main>
   );
