@@ -2033,6 +2033,8 @@ public sealed class SqlOSAuthServiceTests
     {
         var byEmail = await EmailOtpHarness.CreateAsync(options =>
         {
+            // The cooldown is checked first and would answer the repeat start for this address.
+            options.EmailOtp.ResendCooldown = TimeSpan.Zero;
             options.EmailOtp.MaxChallengesPerHour = 1;
         });
         await byEmail.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(

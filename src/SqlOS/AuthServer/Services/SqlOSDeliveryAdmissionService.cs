@@ -6,8 +6,8 @@ using SqlOS.Security;
 namespace SqlOS.AuthServer.Services;
 
 /// <summary>
-/// Atomically reserves every applicable password-reset or phone-OTP delivery bucket before a
-/// marker, challenge, or provider send. Reservations stay charged through provider failure and
+/// Atomically reserves every applicable password-reset, phone-OTP, email-OTP, or magic-link
+/// delivery bucket before a marker, challenge, token, or provider send. Reservations stay charged through provider failure and
 /// timeout so concurrent replicas cannot exceed the configured caps. Capacity returns when the
 /// rate-limit window expires.
 /// </summary>
@@ -21,6 +21,13 @@ public sealed class SqlOSDeliveryAdmissionService
     internal const string PhoneOtpAccountScope = "phone-otp-account";
     internal const string PhoneOtpIpScope = "phone-otp-ip";
     internal const string PhoneOtpClientScope = "phone-otp-client";
+    internal const string EmailOtpEmailScope = "email-otp-email";
+    internal const string EmailOtpIpScope = "email-otp-ip";
+    internal const string EmailOtpClientScope = "email-otp-client";
+    internal const string MagicLinkEmailScope = "magic-link-email";
+    internal const string MagicLinkIpScope = "magic-link-ip";
+    internal const string MagicLinkClientScope = "magic-link-client";
+    private static readonly TimeSpan EmailOtpRateLimitWindow = TimeSpan.FromHours(1);
 
     private readonly ISqlOSRateLimitStore _store;
 
@@ -110,6 +117,68 @@ public sealed class SqlOSDeliveryAdmissionService
         return ReserveAsync(requests, now, cancellationToken);
     }
 
+    public Task<SqlOSDeliveryAdmissionDecision> ReserveEmailOtpAsync(
+        string normalizedEmail,
+        string? ipAddress,
+        string? clientApplicationId,
+        SqlOSEmailOtpOptions options,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        var requests = new List<(string Scope, SqlOSRateLimitBucketRequest Request)>(3)
+        {
+            CreateRequest(
+                EmailOtpEmailScope,
+                HashKey(normalizedEmail),
+                options.MaxChallengesPerHour,
+                EmailOtpRateLimitWindow)
+        };
+        AddOptional(
+            requests,
+            EmailOtpIpScope,
+            ipAddress,
+            options.MaxChallengesPerIpPerHour,
+            EmailOtpRateLimitWindow);
+        AddOptional(
+            requests,
+            EmailOtpClientScope,
+            clientApplicationId,
+            options.MaxChallengesPerClientPerHour,
+            EmailOtpRateLimitWindow);
+        return ReserveAsync(requests, now, cancellationToken);
+    }
+
+    public Task<SqlOSDeliveryAdmissionDecision> ReserveMagicLinkAsync(
+        string normalizedEmail,
+        string? ipAddress,
+        string? clientApplicationId,
+        SqlOSMagicLinkOptions options,
+        DateTimeOffset now,
+        CancellationToken cancellationToken = default)
+    {
+        var requests = new List<(string Scope, SqlOSRateLimitBucketRequest Request)>(3)
+        {
+            CreateRequest(
+                MagicLinkEmailScope,
+                HashKey(normalizedEmail),
+                options.MaxLinksPerEmailPerWindow,
+                options.RateLimitWindow)
+        };
+        AddOptional(
+            requests,
+            MagicLinkIpScope,
+            ipAddress,
+            options.MaxLinksPerIpPerWindow,
+            options.RateLimitWindow);
+        AddOptional(
+            requests,
+            MagicLinkClientScope,
+            clientApplicationId,
+            options.MaxLinksPerClientPerWindow,
+            options.RateLimitWindow);
+        return ReserveAsync(requests, now, cancellationToken);
+    }
+
     private async Task<SqlOSDeliveryAdmissionDecision> ReserveAsync(
         IReadOnlyList<(string Scope, SqlOSRateLimitBucketRequest Request)> requests,
         DateTimeOffset now,
@@ -159,10 +228,10 @@ public sealed class SqlOSDeliveryAdmissionService
     private static string ToPublicScope(string scope)
         => scope switch
         {
-            PasswordResetEmailScope => "email",
+            PasswordResetEmailScope or EmailOtpEmailScope or MagicLinkEmailScope => "email",
             PasswordResetUserScope => "user",
-            PasswordResetIpScope or PhoneOtpIpScope => "ip",
-            PasswordResetClientScope or PhoneOtpClientScope => "client",
+            PasswordResetIpScope or PhoneOtpIpScope or EmailOtpIpScope or MagicLinkIpScope => "ip",
+            PasswordResetClientScope or PhoneOtpClientScope or EmailOtpClientScope or MagicLinkClientScope => "client",
             PhoneOtpPhoneScope => "phone",
             PhoneOtpAccountScope => "account",
             _ => scope

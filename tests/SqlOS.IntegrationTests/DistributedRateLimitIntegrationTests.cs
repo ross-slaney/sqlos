@@ -213,6 +213,34 @@ public class DistributedRateLimitIntegrationTests
         await cleanup.DeleteAsync(ip.Scope, ip.Key);
     }
 
+    [TestMethod]
+    public async Task ReserveMany_AfterTheWindowExpires_StartsANewWindowAtOne()
+    {
+        var connectionString = GetConnectionString();
+        var authOptions = Options.Create(new SqlOSAuthServerOptions());
+        var window = TimeSpan.FromMinutes(5);
+        var bucket = new SqlOSRateLimitBucketRequest("magic-link-email", $"email-{Guid.NewGuid():N}", 2, window, window);
+        var now = DateTimeOffset.UtcNow;
+
+        await using var context = CreateContext(connectionString);
+        var store = new SqlOSDistributedRateLimitStore(context, authOptions);
+        (await store.ReserveManyAsync([bucket], now)).Admitted.Should().BeTrue();
+        (await store.ReserveManyAsync([bucket], now)).Admitted.Should().BeTrue();
+        (await store.ReserveManyAsync([bucket], now)).Admitted.Should().BeFalse("the cap of 2 is spent");
+
+        // Once the window and its lockout have passed, the old count must not carry over.
+        var later = now.Add(window).AddSeconds(1);
+        var first = await store.ReserveManyAsync([bucket], later);
+        first.Admitted.Should().BeTrue();
+        first.Buckets[0]!.Count.Should().Be(1);
+        first.Buckets[0]!.LockedUntil.Should().BeNull();
+        first.Buckets[0]!.WindowStartedAt.Should().BeCloseTo(later, TimeSpan.FromSeconds(1), "the window restarts now, not where the expired one began");
+        (await store.ReserveManyAsync([bucket], later)).Admitted.Should().BeTrue("the new window has a second slot");
+        (await store.ReserveManyAsync([bucket], later)).Admitted.Should().BeFalse();
+
+        await store.DeleteAsync(bucket.Scope, bucket.Key);
+    }
+
     private static string GetConnectionString()
         => AspireFixture.SharedContext?.Database.GetConnectionString()
            ?? throw new InvalidOperationException("The integration database has no connection string.");
