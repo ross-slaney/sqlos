@@ -37,10 +37,11 @@ public static class ExampleApiFixture
 
         _factory = BuildFactory();
 
+        // The shared client also acts as the Development dashboard page.
         Client = _factory.CreateClient(new WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
-        });
+        }).WithDashboardRequestProof();
 
         var response = await Client.GetAsync("/swagger/v1/swagger.json");
         response.EnsureSuccessStatusCode();

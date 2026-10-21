@@ -222,7 +222,7 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
 
     private static async Task<string> CreateOrganizationAsync(HttpClient client, string name)
     {
-        var response = await client.PostAsJsonAsync("/sqlos/admin/auth/api/organizations", new { name });
+        var response = await client.PostAsDashboardJsonAsync("/sqlos/admin/auth/api/organizations", new { name });
         response.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return json.RootElement.GetProperty("id").GetString()!;
@@ -230,7 +230,7 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
 
     private static async Task<string> CreateUserAsync(HttpClient client, string email, string displayName, string password)
     {
-        var response = await client.PostAsJsonAsync("/sqlos/admin/auth/api/users", new { displayName, email, password });
+        var response = await client.PostAsDashboardJsonAsync("/sqlos/admin/auth/api/users", new { displayName, email, password });
         response.EnsureSuccessStatusCode();
         using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return json.RootElement.GetProperty("id").GetString()!;
@@ -238,7 +238,7 @@ public sealed class SqlOSExampleMagicLinkIntegrationTests
 
     private static async Task CreateMembershipAsync(HttpClient client, string organizationId, string userId)
     {
-        var response = await client.PostAsJsonAsync("/sqlos/admin/auth/api/memberships", new { organizationId, userId, role = "member" });
+        var response = await client.PostAsDashboardJsonAsync("/sqlos/admin/auth/api/memberships", new { organizationId, userId, role = "member" });
         response.EnsureSuccessStatusCode();
     }
 

@@ -26,15 +26,20 @@ internal static class SqlOSAdminAuthorizationRouteGroupExtensions
     public static RouteGroupBuilder RequireSqlOSAdminAuthorization(this RouteGroupBuilder group)
     {
         group.WithMetadata(SqlOSAdminRequiredMetadata.Instance);
-        group.RequireSqlOSCookieMutationCsrf();
+        // Authorization runs first so an unauthorized caller always sees the same 404, whether or
+        // not it sent the request proof.
         group.AddEndpointFilter<SqlOSAdminAuthorizationFilter>();
+        group.RequireSqlOSMutationCsrf(SqlOSMutationCsrfScope.Admin);
         return group;
     }
 
     public static RouteGroupBuilder RequireSqlOSCookieMutationCsrf(this RouteGroupBuilder group)
+        => group.RequireSqlOSMutationCsrf(SqlOSMutationCsrfScope.SessionCookie);
+
+    private static RouteGroupBuilder RequireSqlOSMutationCsrf(this RouteGroupBuilder group, SqlOSMutationCsrfScope scope)
     {
         group.WithMetadata(SqlOSCookieMutationCsrfMetadata.Instance);
-        group.AddEndpointFilter<SqlOSCookieMutationCsrfFilter>();
+        group.AddEndpointFilter(new SqlOSCookieMutationCsrfFilter(scope));
         return group;
     }
 

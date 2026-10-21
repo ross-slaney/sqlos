@@ -1263,6 +1263,8 @@ public sealed class SqlOSScimProviderCompatibilityTests
 
             var anonymousClient = app.GetTestClient();
             anonymousClient.BaseAddress = new Uri(PublicOrigin);
+            // Without a SCIM token this client stands in for the Development dashboard page.
+            anonymousClient.WithDashboardRequestProof();
             var client = app.GetTestClient();
             client.BaseAddress = new Uri(PublicOrigin);
 

@@ -59,6 +59,19 @@ curl -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
   http://localhost:5062/sqlos/admin/auth/api/organizations
 ```
 
+Requests that change something (`POST`, `PUT`, `PATCH`, `DELETE`) must also send the dashboard's request proof, the `X-SqlOS-Request: 1` header and an `Origin` that matches your SqlOS host, and FGA dashboard mutations must be JSON:
+
+```bash
+curl -X POST http://localhost:5062/sqlos/admin/auth/api/organizations \
+  -b "$SQLOS_DASHBOARD_COOKIE_JAR" \
+  -H 'X-SqlOS-Request: 1' \
+  -H 'Origin: http://localhost:5062' \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "Acme"}'
+```
+
+The same proof is required when `Dashboard.AuthorizationCallback` or `DevelopmentOnly` mode authorizes the call, unless the call sends an `Authorization: Bearer` header. See [Configuration](/docs/guides/configuration) for the full rule.
+
 The cookie jar contains an operator session. Restrict its permissions, never commit it, and delete it when finished:
 
 ```bash

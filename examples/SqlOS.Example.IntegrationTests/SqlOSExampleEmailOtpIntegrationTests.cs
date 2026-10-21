@@ -382,7 +382,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
 
     private static async Task<string> CreateOrganizationAsync(HttpClient client, string name)
     {
-        var response = await client.PostAsJsonAsync("/sqlos/admin/auth/api/organizations", new { name });
+        var response = await client.PostAsDashboardJsonAsync("/sqlos/admin/auth/api/organizations", new { name });
         response.EnsureSuccessStatusCode();
         var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return json.RootElement.GetProperty("id").GetString()!;
@@ -390,7 +390,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
 
     private static async Task<string> CreateUserAsync(HttpClient client, string email, string displayName, string password)
     {
-        var response = await client.PostAsJsonAsync("/sqlos/admin/auth/api/users", new
+        var response = await client.PostAsDashboardJsonAsync("/sqlos/admin/auth/api/users", new
         {
             displayName,
             email,
@@ -403,7 +403,7 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
 
     private static async Task CreateMembershipAsync(HttpClient client, string organizationId, string userId, string role)
     {
-        var response = await client.PostAsJsonAsync("/sqlos/admin/auth/api/memberships", new
+        var response = await client.PostAsDashboardJsonAsync("/sqlos/admin/auth/api/memberships", new
         {
             organizationId,
             userId,

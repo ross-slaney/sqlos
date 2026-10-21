@@ -66,7 +66,8 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     {
         _app = app;
         _scope = scope;
-        Client = app.GetTestClient();
+        // The dashboard control plane is the dashboard page's own requests.
+        Client = app.GetTestClient().WithDashboardRequestProof();
         Context = scope.ServiceProvider.GetRequiredService<TestSqlOSInMemoryDbContext>();
         Options = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SqlOSAuthServerOptions>>().Value;
         Admin = scope.ServiceProvider.GetRequiredService<SqlOSAdminService>();

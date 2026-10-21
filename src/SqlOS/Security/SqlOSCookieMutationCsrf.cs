@@ -12,9 +12,29 @@ using SqlOS.Configuration;
 namespace SqlOS.Security;
 
 /// <summary>
-/// Shared CSRF boundary for SqlOS mutations authenticated by the dashboard session
-/// cookie or the SSO-portal session cookie. Requests that do not present either cookie
-/// stay on their existing bearer or callback path.
+/// Which unsafe requests must prove they come from a SqlOS page.
+/// </summary>
+internal enum SqlOSMutationCsrfScope
+{
+    /// <summary>
+    /// Only requests that present the dashboard or SSO-portal session cookie. Used by the SSO
+    /// portal, whose other callers authenticate with credentials a browser does not attach.
+    /// </summary>
+    SessionCookie,
+
+    /// <summary>
+    /// Every unsafe request except one that carries an <c>Authorization: Bearer</c> header and no
+    /// session cookie. Admin and FGA dashboard requests can be authorized by a host
+    /// <c>AuthorizationCallback</c> from ambient browser state (host cookies, SSO or proxy headers,
+    /// network location) or by DevelopmentOnly mode, so the cookie is not the only ambient credential.
+    /// </summary>
+    Admin
+}
+
+/// <summary>
+/// Shared CSRF boundary for SqlOS mutations. A protected request must send
+/// <c>X-SqlOS-Request: 1</c> and a same-origin <c>Origin</c> or <c>Referer</c>; see
+/// <see cref="SqlOSMutationCsrfScope"/> for which requests are protected.
 /// </summary>
 internal static class SqlOSCookieMutationCsrf
 {
@@ -26,9 +46,9 @@ internal static class SqlOSCookieMutationCsrf
     internal const string RejectionMessage = "The request could not be verified.";
     internal const string RejectionEventType = "security.csrf_rejected";
 
-    internal static async Task<bool> RejectIfRequiredAsync(HttpContext context)
+    internal static async Task<bool> RejectIfRequiredAsync(HttpContext context, SqlOSMutationCsrfScope scope)
     {
-        var decision = Evaluate(context);
+        var decision = Evaluate(context, scope);
         if (decision.IsAllowed)
         {
             return false;
@@ -39,7 +59,7 @@ internal static class SqlOSCookieMutationCsrf
         return true;
     }
 
-    internal static SqlOSCookieMutationCsrfDecision Evaluate(HttpContext context)
+    internal static SqlOSCookieMutationCsrfDecision Evaluate(HttpContext context, SqlOSMutationCsrfScope scope)
     {
         var request = context.Request;
         if (!IsUnsafeMethod(request.Method))
@@ -48,8 +68,11 @@ internal static class SqlOSCookieMutationCsrf
         }
 
         var options = ResolveOptions(context);
-        if (!HasAmbientSessionCookie(request, options))
+        if (!HasAmbientSessionCookie(request, options)
+            && (scope == SqlOSMutationCsrfScope.SessionCookie || HasBearerAuthorization(request)))
         {
+            // A browser cannot attach an Authorization header to a cross-site request without a
+            // CORS preflight, so a bearer-authenticated admin API call is not forgeable.
             return SqlOSCookieMutationCsrfDecision.Allow;
         }
 
@@ -87,6 +110,21 @@ internal static class SqlOSCookieMutationCsrf
         }
 
         return request.Cookies.ContainsKey(portalCookieName.Trim());
+    }
+
+    private static bool HasBearerAuthorization(HttpRequest request)
+    {
+        var values = request.Headers.Authorization;
+        if (values.Count != 1)
+        {
+            return false;
+        }
+
+        var value = values[0]?.Trim();
+        return value != null
+            && value.Length > "Bearer ".Length
+            && value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(value["Bearer ".Length..]);
     }
 
     private static bool HasRequiredHeader(HttpRequest request)
@@ -305,11 +343,11 @@ internal sealed class SqlOSCookieMutationCsrfMetadata
     }
 }
 
-internal sealed class SqlOSCookieMutationCsrfFilter : IEndpointFilter
+internal sealed class SqlOSCookieMutationCsrfFilter(SqlOSMutationCsrfScope scope) : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
-        var decision = SqlOSCookieMutationCsrf.Evaluate(context.HttpContext);
+        var decision = SqlOSCookieMutationCsrf.Evaluate(context.HttpContext, scope);
         if (!decision.IsAllowed)
         {
             await SqlOSCookieMutationCsrf.RecordRejectionAsync(context.HttpContext, decision.Reason);
