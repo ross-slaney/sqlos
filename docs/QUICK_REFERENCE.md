@@ -20,13 +20,13 @@ Both use the same users, sessions, organizations, FGA services, and dashboard. A
 Use .NET 10, EF Core 10, and an accessible SQL Server or PostgreSQL database. The currently published package version is:
 
 ```bash
-dotnet add package SqlOS --version 11.1.0
+dotnet add package SqlOS --version 11.1.1
 ```
 
 Optional package for the custom-login examples:
 
 ```bash
-npm install @sqlos/headless@11.1.0
+npm install @sqlos/headless@11.1.1
 ```
 
 This is a complete `Program.cs`. Supply `ConnectionStrings:DefaultConnection` through user secrets or your deployment configuration, then run on `http://localhost:5050` in Development. Use an HTTPS origin in production.
