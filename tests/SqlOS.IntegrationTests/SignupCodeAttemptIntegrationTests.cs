@@ -206,6 +206,48 @@ public sealed class SignupCodeAttemptIntegrationTests
     }
 
     [TestMethod]
+    public async Task HeadlessEmailSignup_ConcurrentRightCodes_CreateExactlyOneAccount()
+    {
+        const int submissions = 3;
+        var barrier = new FirstChallengeUpdateBarrier("SqlOSEmailOtpChallenges", submissions);
+        await using var host = await SignupCodeHost.CreateAsync(headless: true, barrier: barrier);
+        var email = UniqueEmail("headless-once");
+        var requestId = await host.StartHeadlessAuthorizationAsync();
+        var started = await host.PostHeadlessAsync("/sqlos/auth/headless/signup/email-otp/start", new
+        {
+            requestId,
+            displayName = "Concurrent signup",
+            email,
+            organizationName = $"Concurrent Org {Guid.NewGuid():N}"
+        });
+        var challengeToken = started.ViewString("challengeToken");
+        var signupToken = started.ViewString("signupToken");
+        var code = host.LatestEmailCode(email);
+
+        barrier.Arm();
+        var results = await Task.WhenAll(Enumerable.Range(0, submissions).Select(_ =>
+            host.PostHeadlessAsync("/sqlos/auth/headless/signup/email-otp/verify", new
+            {
+                requestId, signupToken, challengeToken, code
+            })));
+        barrier.Disarm();
+
+        barrier.Held.Should().Be(submissions);
+        results.Count(x => x.Type == "redirect").Should().Be(1);
+        foreach (var rejected in results.Where(x => x.Type != "redirect"))
+        {
+            rejected.Type.Should().Be("view");
+            rejected.ViewString("error").Should().Be(InvalidCodeMessage);
+        }
+
+        await using var db = host.CreateDbContext();
+        var userId = await db.Set<SqlOSUserEmail>().Where(x => x.Email == email).Select(x => x.UserId).SingleAsync();
+        (await db.Set<SqlOSAuthorizationCode>().CountAsync(x => x.UserId == userId)).Should().Be(1);
+        (await db.Set<SqlOSEmailOtpChallenge>().SingleAsync(x => x.Email == email)).ConsumedAt.Should().NotBeNull();
+        (await db.Set<SqlOSTemporaryToken>().SingleAsync(x => x.Purpose == "email_otp_signup")).ConsumedAt.Should().NotBeNull();
+    }
+
+    [TestMethod]
     public async Task HeadlessEmailSignup_FiveWrongCodesInvalidateTheChallenge_AndTheRightCodeCreatesNoAccount()
     {
         await using var host = await SignupCodeHost.CreateAsync(headless: true);
@@ -284,6 +326,46 @@ public sealed class SignupCodeAttemptIntegrationTests
 
         host.Sms.ChecksFor(phoneNumber).Should().Be(1);
         await host.AssertPhoneChallengeRejectedAsync(phoneNumber);
+    }
+
+    [TestMethod]
+    public async Task PublicEmailSignup_ConcurrentRightCodes_CreateExactlyOneAccount()
+    {
+        const int submissions = 3;
+        var barrier = new FirstChallengeUpdateBarrier("SqlOSEmailOtpChallenges", submissions);
+        await using var host = await SignupCodeHost.CreateAsync(barrier: barrier);
+        var email = UniqueEmail("public-once");
+        SqlOSEmailOtpSignupStartResult started;
+        await using (var scope = host.Fixture.App.Services.CreateAsyncScope())
+        {
+            started = await scope.ServiceProvider.GetRequiredService<SqlOSAuthService>().RequestEmailOtpSignupAsync(
+                new SqlOSEmailOtpSignupStartRequest("Concurrent Public", email, HostedAuthorizeTokenFixture.ClientId, null, null, null),
+                SignupCodeHost.HttpContext());
+        }
+
+        var code = host.LatestEmailCode(email);
+        barrier.Arm();
+        var results = await Task.WhenAll(Enumerable.Range(0, submissions).Select(async _ =>
+        {
+            try
+            {
+                await host.VerifyPublicEmailSignupAsync(started, code);
+                return true;
+            }
+            catch (InvalidOperationException ex) when (ex.Message == InvalidCodeMessage)
+            {
+                return false;
+            }
+        }));
+        barrier.Disarm();
+
+        barrier.Held.Should().Be(submissions);
+        results.Count(x => x).Should().Be(1);
+        await using var db = host.CreateDbContext();
+        var userId = await db.Set<SqlOSUserEmail>().Where(x => x.Email == email).Select(x => x.UserId).SingleAsync();
+        (await db.Set<SqlOSSession>().CountAsync(x => x.UserId == userId)).Should().Be(1);
+        (await db.Set<SqlOSEmailOtpChallenge>().SingleAsync(x => x.Email == email)).ConsumedAt.Should().NotBeNull();
+        (await db.Set<SqlOSTemporaryToken>().SingleAsync(x => x.Purpose == "email_otp_signup")).ConsumedAt.Should().NotBeNull();
     }
 
     [TestMethod]

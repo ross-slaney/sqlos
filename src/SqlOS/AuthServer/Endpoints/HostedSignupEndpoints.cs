@@ -503,6 +503,14 @@ public static partial class EndpointRouteBuilderExtensions
                     transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
                 }
 
+                // Claim the one-use artifacts before creating the account. Concurrent
+                // submissions must lose here, not at the unique email constraint.
+                // A later failure rolls consumption back with the account transaction.
+                if (transaction != null)
+                {
+                    await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                }
+
                 var signup = await authorizationServerService.SignUpWithEmailOtpAsync(
                     signupVerification.DisplayName,
                     signupVerification.Email,
@@ -523,7 +531,10 @@ public static partial class EndpointRouteBuilderExtensions
                     }
 
                     await issuerSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
-                    await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                    if (transaction == null)
+                    {
+                        await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                    }
                     if (transaction != null)
                     {
                         await transaction.CommitAsync(cancellationToken);
@@ -539,7 +550,10 @@ public static partial class EndpointRouteBuilderExtensions
                     context,
                     cancellationToken);
 
-                await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                if (transaction == null)
+                {
+                    await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
+                }
                 if (transaction != null)
                 {
                     await transaction.CommitAsync(cancellationToken);
