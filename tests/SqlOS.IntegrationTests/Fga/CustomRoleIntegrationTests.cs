@@ -113,6 +113,48 @@ public class CustomRoleIntegrationTests
             await service.WithOwnerTransactionAsync("admin", "acme", () =>
                 service.RevokeAsync("admin", "acme", composed.Id, composed.Revision, "jamie", "acme"));
             (await service.ListGrantsAsync("admin", "acme", composed.Id)).Data.Should().BeEmpty();
+            // A host SaveChanges hook has already staged membership changes. It must share the
+            // owner's lock before reading grants to reconcile, even though it cannot call the
+            // interactive service's pending-change guard.
+            await FluentActions.Invoking(() => SqlOSCustomRoleService.LockOwnerAsync(db, "acme"))
+                .Should().ThrowAsync<SqlOSCustomRoleException>().Where(x => x.Code == "transaction_required");
+            db.Set<SqlOSFgaSubject>().Add(new() { Id = "members", SubjectTypeId = "group", DisplayName = "Members" });
+            db.Set<SqlOSFgaUserGroup>().Add(new() { Id = "members", SubjectId = "members", Name = "Members" });
+            db.Set<SqlOSFgaUserGroupMembership>().Add(new() { UserGroupId = "members", SubjectId = "jamie" });
+            await db.SaveChangesAsync();
+            options.CustomRoles.IsEligibleRecipientAsync = (context, owner, subject, token) =>
+                context.Set<SqlOSFgaUserGroupMembership>().AnyAsync(x => owner == "acme" && x.UserGroupId == "members" && x.SubjectId == subject, token);
+            var lifecycleRole = await service.CreateAsync("admin", "acme", new("Lifecycle", null, ["ASSIGN"]));
+            lifecycleRole = await service.GrantAsync("admin", "acme", lifecycleRole.Id, lifecycleRole.Revision, "jamie", "acme");
+            await using (var lifecycle = await db.Database.BeginTransactionAsync())
+            {
+                db.Set<SqlOSFgaUserGroupMembership>().Remove(await db.Set<SqlOSFgaUserGroupMembership>().SingleAsync(x => x.UserGroupId == "members"));
+                await SqlOSCustomRoleService.LockOwnerAsync(db, "acme"); // accepts staged host changes
+                db.Set<SqlOSFgaGrant>().RemoveRange(await db.Set<SqlOSFgaGrant>()
+                    .Where(x => x.SubjectId == "jamie" && x.Role!.OwnerResourceId == "acme").ToListAsync());
+                var attempting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var concurrentGrant = Task.Run(async () =>
+                {
+                    await using var isolated = new TestSqlOSDbContext(new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                        .UseTestProvider(db.Database.GetConnectionString()!).Options);
+                    var isolatedAuth = new SqlOSFgaAuthService(isolated, configured, NullLogger<SqlOSFgaAuthService>.Instance);
+                    var isolatedCrypto = new SqlOSCryptoService(isolated, Options.Create(AspireFixture.Options), AspireFixture.DataProtectionProvider);
+                    var roles = new SqlOSCustomRoleService(isolated, isolatedAuth, new SqlOSAuditLogService(isolated, isolatedCrypto), configured);
+                    attempting.SetResult();
+                    try
+                    {
+                        await roles.GrantAsync("admin", "acme", lifecycleRole.Id, lifecycleRole.Revision, "jamie", "acme");
+                        return "committed";
+                    }
+                    catch (SqlOSCustomRoleException error) { return error.Code; }
+                });
+                await attempting.Task;
+                (await Task.WhenAny(concurrentGrant, Task.Delay(300))).Should().NotBe(concurrentGrant);
+                await db.SaveChangesAsync();
+                await lifecycle.CommitAsync();
+                (await concurrentGrant).Should().Be("recipient_denied");
+            }
+            (await db.Set<SqlOSFgaGrant>().AnyAsync(x => x.SubjectId == "jamie" && x.Role!.OwnerResourceId == "acme")).Should().BeFalse();
             await service.RetireAsync("admin", "acme", role.Id, role.Revision);
             (await db.Set<SqlOSFgaGrant>().AnyAsync(x => x.RoleId == role.Id)).Should().BeFalse();
         }

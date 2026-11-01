@@ -174,6 +174,22 @@ public sealed class SqlOSCustomRoleService(
             return after;
         }, ct);
 
+    /// <summary>
+    /// Coordinate a trusted host lifecycle/save hook with role administration. The host must already
+    /// authorize its membership change, begin a transaction, then acquire this lock before reading
+    /// grants to reconcile. Pending tracked changes are allowed; this method does not save them.
+    /// Hold it through membership/grant reconciliation and commit. For multiple owners, lock in ordinal order.
+    /// </summary>
+    public static Task LockOwnerAsync(ISqlOSFgaDbContext context, string owner, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(owner);
+        if (!context.Database.IsRelational()) return Task.CompletedTask;
+        if (context.Database.CurrentTransaction == null)
+            throw Error("transaction_required", "Begin a transaction before coordinating membership and role grants.");
+        return SqlOSDatabase.AcquireExclusiveTransactionLockAsync(context.Database, $"SqlOS:CustomRoles:{owner}",
+            TimeSpan.FromSeconds(30), "Custom role administration is busy; retry.", ct);
+    }
+
     private async Task<T> InTransactionAsync<T>(string actor, string owner, Func<Task<T>> operation, CancellationToken ct)
     {
         if (db is DbContext pending && pending.ChangeTracker.HasChanges())
@@ -185,8 +201,7 @@ public sealed class SqlOSCustomRoleService(
         var transaction = owned ?? outer;
         var savepoint = outer == null ? null : Guid.NewGuid().ToString("N");
         if (transaction != null)
-            await SqlOSDatabase.AcquireExclusiveTransactionLockAsync(db.Database, $"SqlOS:CustomRoles:{owner}",
-                TimeSpan.FromSeconds(30), "Custom role administration is busy; retry.", ct);
+            await LockOwnerAsync(db, owner, ct);
         if (savepoint != null) await outer!.CreateSavepointAsync(savepoint, ct);
         try
         {

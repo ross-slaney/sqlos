@@ -149,3 +149,9 @@ its subtree; do not hard-delete an organization resource while retaining its rol
 A host must also authorize squad membership changes: anyone allowed to add a member to a squad
 can give that person every role held by the squad. The grant recipient policy does not replace
 that membership policy.
+
+### Membership save hooks
+
+A host that reconciles membership and grants inside `SaveChanges` already has staged membership changes. Begin or join the host transaction and call `SqlOSCustomRoleService.LockOwnerAsync(db, ownerResourceId)` **before reading grants to remove**. This is a trusted lifecycle coordination API: it does not authorize membership changes, save rows, or replace the host's membership audit. Lock multiple owners in ordinal order and retain the transaction through the final save/commit. Relational calls without a transaction fail; in-memory fixtures provide no concurrency guarantee.
+
+For offboarding, reconcile the recipient's customer grants by the role's `OwnerResourceId` as well as the application's normal node relationships, so a previously moved grant cannot be revived later. The membership change and removal of those grants must commit together. Role administration remains through the management service; this hook lets the host's existing membership reconciliation share its lock without pretending a staged membership change is an interactive role edit.
