@@ -26,14 +26,14 @@ public class SqlOSFgaPageSqlTests
         AppResourceIdColumn: "ResourceId",
         KeyStoreType: "uniqueidentifier");
 
-    // fn_IsResourceAccessible must not change: these are the SHA-256 hashes of its text before
-    // the page-order functions were added (default options, and a custom schema, table and depth).
+    // Reviewed customer-role point-check SQL, including owner depth relative to the grant.
+    // Separate real-database tests verify point/page agreement and concurrent initialization.
     [TestMethod]
-    [DataRow(false, false, "0a94ab5b96978a2d198b0a1014737ba43728fc835b53b3a2bb9c71119f18847c")]
-    [DataRow(false, true, "9d0c18819926fa08945b254a4e6bccaac922641f3fa42fcb1f762ac32bf037be")]
-    [DataRow(true, false, "e96d930bb67f7e6ba21086065804b37b1f8ff7006cdcb7effa27464032032dd6")]
-    [DataRow(true, true, "e2c8c7f23b9e855abebc24fd9d64a0e9b04ec75a9ca40a65d16b2216f4c18ef5")]
-    public void IsResourceAccessibleFunction_IsUnchanged(bool postgreSql, bool customOptions, string expectedSha256)
+    [DataRow(false, false, "7ca59ced578eae236eee25e6ae50c0aa8831edee5b06220948fb35bd0645e779")]
+    [DataRow(false, true, "30bb1cb173b3afc70aed37749df359e698108034a306ce4e142e3b7155ecaa77")]
+    [DataRow(true, false, "fd7e35481ad71bce6fb43f8b9cd1e1a980b7c4b79716a93cf88f5f972794a5f3")]
+    [DataRow(true, true, "29210e34b4bca49eedf8a58b1883c495970dbf86654a3f949dcfeacd794ff4dc")]
+    public void IsResourceAccessibleFunction_MatchesReviewedCustomerOwnershipSnapshot(bool postgreSql, bool customOptions, string expectedSha256)
     {
         var sql = Provider(postgreSql).BuildIsResourceAccessibleFunctionSql(customOptions ? CustomOptions() : new SqlOSFgaOptions());
 

@@ -133,6 +133,18 @@ public sealed class SqlOSFgaSeedBuilder
     public SqlOSFgaSeedBuilder Permission(string key, string name, string resourceTypeId)
         => Permission(key, key, name, resourceTypeId);
 
+    /// <summary>Explicitly opt already declared permissions into customer-defined roles.</summary>
+    public SqlOSFgaSeedBuilder AllowInCustomRoles(params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!_permissionsByKey.TryGetValue(key, out var permission))
+                throw new InvalidOperationException($"Declare permission '{key}' before allowing it in custom roles.");
+            permission.AllowInCustomRoles = true;
+        }
+        return this;
+    }
+
     /// <summary>Adds or replaces a role with independent identifier and key values.</summary>
     /// <param name="id">The stable role identifier stored on grants.</param>
     /// <param name="key">The application-facing role key used by grant helpers.</param>
@@ -239,6 +251,7 @@ public sealed class SqlOSFgaSeedBuilder
             Key = source.Key,
             Name = source.Name,
             Description = source.Description,
+            AllowInCustomRoles = source.AllowInCustomRoles,
             ResourceTypeId = source.ResourceTypeId
         };
 
@@ -249,7 +262,11 @@ public sealed class SqlOSFgaSeedBuilder
             Key = source.Key,
             Name = source.Name,
             Description = source.Description,
-            IsVirtual = source.IsVirtual
+            IsVirtual = source.IsVirtual,
+            DefinitionSource = source.DefinitionSource,
+            OwnerResourceId = source.OwnerResourceId,
+            Revision = source.Revision,
+            ArchivedAt = source.ArchivedAt
         };
 }
 

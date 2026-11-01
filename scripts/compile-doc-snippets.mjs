@@ -7,6 +7,23 @@ const scriptPath = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(scriptPath), "..");
 const snippetSpecs = [
   {
+    name: "customer-role permission catalog", relativePath: "web/content/docs/fga/roles.mdx",
+    heading: "## Customer-owned roles", marker: "options.Fga.Seed(seed =>",
+    wrap: (snippet) => `using SqlOS.Configuration;
+var options = new SqlOSOptions();
+${snippet}`,
+  },
+  {
+    name: "customer-role creation and grant", relativePath: "web/content/docs/fga/roles.mdx",
+    heading: "## Customer-owned roles", marker: "var role = await roles.CreateAsync",
+    wrap: (snippet) => `using SqlOS.Fga.Services;
+await Task.CompletedTask;
+static async Task ConfigureAsync(SqlOSCustomRoleService roles, string callerPrincipalId, string organizationResourceId, string supervisorsSubjectId, CancellationToken cancellationToken)
+{
+${snippet}
+}`,
+  },
+  {
     name: "standalone multi-client host", relativePath: "web/content/docs/guides/standalone-identity-server.mdx",
     heading: "## 1. Configure the auth host", marker: "var builder = WebApplication.CreateBuilder(args);",
     wrap: asCompleteProgram,

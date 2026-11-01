@@ -93,6 +93,9 @@ td a:hover, .tree-resource-name:hover { color: var(--amber-600); }
 .btn-primary { background: var(--zinc-800); color: #fff; border: none; padding: 0.4rem 0.75rem; border-radius: var(--radius); cursor: pointer; font-size: 0.8125rem; font-weight: 500; transition: transform 140ms cubic-bezier(0.23, 1, 0.32, 1), background 0.15s ease; }
 .btn-primary:hover { background: var(--zinc-700); }
 .btn-primary:active { transform: scale(0.97); }
+.btn-secondary { background: #fff; color: var(--zinc-700); border: 1px solid var(--zinc-200); padding: 0.4rem 0.75rem; border-radius: var(--radius); cursor: pointer; font-size: 0.8125rem; }
+.btn-secondary:hover { background: var(--zinc-50); }
+.custom-role-note { padding: 0 1.25rem; color: var(--zinc-600); font-size: 0.8125rem; }
 .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
 .btn-danger { background: var(--red-50); color: var(--red-600); border: 1px solid var(--red-100); padding: 0.4rem 0.75rem; border-radius: var(--radius); cursor: pointer; font-size: 0.8125rem; }
 .btn-danger:hover { background: var(--red-100); }
@@ -223,8 +226,8 @@ td a:hover, .tree-resource-name:hover { color: var(--amber-600); }
 .modal h3 { padding: 1rem 1.25rem; border-bottom: 1px solid var(--zinc-200); font-size: 0.95rem; font-weight: 600; }
 .modal-field { padding: 0 1.25rem; margin-top: 0.75rem; }
 .modal-field label { display: block; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--zinc-500); margin-bottom: 0.3rem; }
-.modal-field select, .modal-field input[type="text"] { width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--zinc-200); border-radius: var(--radius); font-size: 0.8125rem; }
-.modal-field select:focus, .modal-field input[type="text"]:focus { outline: none; border-color: var(--amber-400); box-shadow: 0 0 0 2px var(--amber-100); }
+.modal-field select, .modal-field input[type="text"], .modal-field textarea { width: 100%; padding: 0.45rem 0.6rem; border: 1px solid var(--zinc-200); border-radius: var(--radius); font-size: 0.8125rem; }
+.modal-field select:focus, .modal-field input[type="text"]:focus, .modal-field textarea:focus { outline: none; border-color: var(--amber-400); box-shadow: 0 0 0 2px var(--amber-100); }
 .modal-actions { display: flex; gap: 0.5rem; padding: 1rem 1.25rem; justify-content: flex-end; border-top: 1px solid var(--zinc-200); margin-top: 1rem; }
 .modal-actions button { padding: 0.4rem 0.75rem; border-radius: var(--radius); cursor: pointer; font-size: 0.8125rem; }
 .modal-actions .btn-primary { background: var(--zinc-800); color: #fff; border: none; }

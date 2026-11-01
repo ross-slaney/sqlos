@@ -343,7 +343,7 @@
     }
 
     function renderSeedNotice() {
-        return `<div class="card" style="margin-bottom:1rem"><strong>Startup seed notice:</strong> Resource types, roles, and permissions are defined in startup code with <code>options.Fga.Seed</code>. This dashboard inspects that model and manages grants.</div>`;
+        return `<div class="card" style="margin-bottom:1rem"><strong>Startup seed notice:</strong> Resource types, built-in roles, and permissions are defined in startup code with <code>options.Fga.Seed</code>. Built-in definitions remain read-only. This dashboard manages grants and customer roles owned by a resource.</div>`;
     }
 
     // --- Resource Tree (cursor-paginated roots, lazy children) ---
@@ -949,7 +949,7 @@
                 <td>${g.effectiveFrom ? new Date(g.effectiveFrom).toLocaleDateString() : '-'}</td>
                 <td>${g.effectiveTo ? new Date(g.effectiveTo).toLocaleDateString() : '-'}</td>
                 <td>${new Date(g.createdAt).toLocaleDateString()}</td>
-                <td><button class="btn-danger btn-sm revoke-btn" data-grant-id="${esc(g.id)}">Revoke</button></td>
+                <td><button class="btn-danger btn-sm revoke-btn" data-grant-id="${esc(g.id)}" data-customer-role-id="${g.isCustomerRole ? esc(g.roleId) : ''}">${g.isCustomerRole ? 'Manage role' : 'Revoke'}</button></td>
             </tr>`;
         });
         html += `</tbody></table>`;
@@ -975,6 +975,7 @@
         root.querySelectorAll('.revoke-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
+                if (btn.dataset.customerRoleId) { navigate('#/roles/' + encodeURIComponent(btn.dataset.customerRoleId)); return; }
                 const grantId = btn.dataset.grantId;
                 if (!confirm('Revoke this grant?')) return;
                 try {
@@ -1025,7 +1026,7 @@
                 <td>${g.effectiveFrom ? new Date(g.effectiveFrom).toLocaleDateString() : '-'}</td>
                 <td>${g.effectiveTo ? new Date(g.effectiveTo).toLocaleDateString() : '-'}</td>
                 <td>${new Date(g.createdAt).toLocaleDateString()}</td>
-                <td><button class="btn-danger btn-sm revoke-btn grant-revoke-btn" data-grant-id="${esc(g.id)}">Revoke</button></td>
+                <td><button class="btn-danger btn-sm revoke-btn grant-revoke-btn" data-grant-id="${esc(g.id)}" data-customer-role-id="${g.isCustomerRole ? esc(g.roleId) : ''}">${g.isCustomerRole ? 'Manage role' : 'Revoke'}</button></td>
             </tr>`).join('')}</tbody></table>
             <div id="grants-pagination">${renderPagination(pager, result)}</div>
         </div>`;
@@ -1034,6 +1035,7 @@
         root.querySelectorAll('.grant-revoke-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
+                if (btn.dataset.customerRoleId) { navigate('#/roles/' + encodeURIComponent(btn.dataset.customerRoleId)); return; }
                 const grantId = btn.dataset.grantId;
                 if (!confirm('Revoke this grant?')) return;
                 try {
@@ -1067,18 +1069,19 @@
 
         content.innerHTML = `${renderSeedNotice()}<div class="card">
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
-                <div style="flex:1;min-width:200px">${renderSearchBox('roles-search', 'Search roles...')}</div>
+                <div style="flex:1;min-width:200px">${renderSearchBox('roles-search', 'Search roles...')}</div><button class="btn-primary" id="new-custom-role">Create customer role</button>
             </div>
             <table><thead><tr>
-                <th>Name</th><th>Key</th><th>Permissions</th><th>Virtual</th>
+                <th>Name</th><th>Key</th><th>Permissions</th><th>Owner</th>
             </tr></thead><tbody>${rows.map(r => `<tr class="role-row" data-id="${esc(r.id)}" style="cursor:pointer">
                 <td>${esc(r.name)}</td><td><code>${esc(r.key)}</code></td>
                 <td><span class="badge badge-gray">${r.permissionCount}</span></td>
-                <td>${r.isVirtual ? 'Yes' : 'No'}</td>
+                <td>${r.ownerResourceId ? esc(r.ownerResourceId) + (r.archivedAt ? ' · Retired' : '') : 'Application'}</td>
             </tr>`).join('')}</tbody></table>
             <div id="roles-pagination">${renderPagination(pager, result)}</div>
         </div>`;
 
+        $('#new-custom-role').addEventListener('click', () => openCustomRoleModal());
         root.querySelectorAll('.role-row').forEach(row => {
             row.addEventListener('click', () => navigate('#/roles/' + encodeURIComponent(row.dataset.id)));
         });
@@ -1094,17 +1097,21 @@
         }
     }
 
-    async function loadRoleDetail(roleId) {
+    async function loadRoleDetail(roleId, opts = {}) {
         content.innerHTML = '<div class="loading">Loading...</div>';
-        const [role, perms] = await Promise.all([
+        const pager = opts.pager || createPager(roleId);
+        const [role, perms, grants] = await Promise.all([
             api(`roles/${encodeURIComponent(roleId)}`),
-            api(`roles/${encodeURIComponent(roleId)}/permissions`)
+            api(`roles/${encodeURIComponent(roleId)}/permissions`),
+            api(`grants?${cursorQueryString(pager, { roleId })}`)
         ]);
 
         let html = `<div class="detail-header">
             <button class="detail-back" id="back-to-roles">&larr; Back to Roles</button>
             <h2>${esc(role.name)}</h2>
-            ${role.isVirtual ? '<span class="badge badge-gray">Virtual</span>' : ''}
+            <span class="badge badge-gray">${role.ownerResourceId ? esc(role.ownerResourceId) : 'Application-owned'}</span>
+            ${role.definitionSource === 'customer' && !role.archivedAt ? '<button id="edit-custom-role" class="btn-secondary">Edit</button><button id="grant-custom-role" class="btn-secondary">Grant access</button><button id="revoke-custom-role" class="btn-secondary">Revoke access</button><button id="retire-custom-role" class="btn-secondary">Retire</button>' : ''}
+            ${role.archivedAt ? '<span class="badge badge-gray">Retired</span>' : ''}
         </div>`;
 
         html += `<div class="detail-grid">
@@ -1115,6 +1122,8 @@
                     <dt>Key</dt><dd><code>${esc(role.key)}</code></dd>
                     <dt>Name</dt><dd>${esc(role.name)}</dd>
                     <dt>Description</dt><dd>${esc(role.description) || '-'}</dd>
+                    <dt>Definition source</dt><dd>${esc(role.definitionSource)}</dd>
+                    <dt>Revision</dt><dd>${role.revision}</dd>
                     <dt>Virtual</dt><dd>${role.isVirtual ? 'Yes' : 'No'}</dd>
                 </dl>
             </div>
@@ -1132,9 +1141,79 @@
             </div>
         </div>`;
 
+        html += `<div class="card"><h3>Grants</h3>
+            <table><thead><tr><th>Principal</th><th>Resource</th></tr></thead><tbody>
+            ${pageItems(grants).map(grant => `<tr><td>${esc(grant.subjectName)} <code>${esc(grant.subjectId)}</code></td><td>${esc(grant.resourceName)} <code>${esc(grant.resourceId)}</code></td></tr>`).join('')}
+            </tbody></table>${pageItems(grants).length ? '' : '<p>No grants.</p>'}
+            <div id="role-grants-pagination">${renderPagination(pager, grants)}</div></div>`;
         content.innerHTML = html;
 
+        bindPagination('#role-grants-pagination', pager, grants, () => loadRoleDetail(roleId, { pager }));
         $('#back-to-roles').addEventListener('click', () => navigate('#/roles'));
+        $('#edit-custom-role')?.addEventListener('click', () => openCustomRoleModal(role, perms));
+        $('#revoke-custom-role')?.addEventListener('click', () => openCustomGrantModal(role, true));
+        $('#grant-custom-role')?.addEventListener('click', () => openCustomGrantModal(role));
+        $('#retire-custom-role')?.addEventListener('click', () => openCustomRoleRetirement(role));
+    }
+
+    function customRoleAttribute(value) {
+        return esc(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    async function submitCustomRole(body) {
+        const response = await apiPost('custom-roles', body);
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || result.error || 'Could not save role.');
+        closeModal();
+        await loadStats();
+        navigate('#/roles/' + encodeURIComponent(result.id));
+    }
+
+    function customRoleDialog(title, fields, label, submit) {
+        $('#modal').innerHTML = `<h3>${esc(title)}</h3>${fields}
+            <p id="custom-role-error" class="custom-role-note" role="alert"></p><div class="modal-actions">
+            <button class="btn-secondary" id="custom-role-cancel">Cancel</button>
+            <button class="btn-primary" id="custom-role-submit">${esc(label)}</button></div>`;
+        $('#modal-overlay').hidden = false;
+        $('#custom-role-cancel').addEventListener('click', closeModal);
+        $('#custom-role-submit').addEventListener('click', async () => {
+            const button = $('#custom-role-submit');
+            button.disabled = true;
+            try { await submit(); }
+            catch (error) { $('#custom-role-error').textContent = error.message; }
+            finally { button.disabled = false; }
+        });
+        $('#modal').querySelector('input:not(:disabled),textarea,button')?.focus();
+    }
+
+    function openCustomRoleModal(role, permissions = []) {
+        customRoleDialog(role ? 'Edit customer role' : 'Create customer role', `
+            <div class="modal-field"><label for="custom-role-owner">Owner resource ID</label><input type="text" id="custom-role-owner" value="${customRoleAttribute(role?.ownerResourceId || '')}" ${role ? 'disabled' : ''}></div>
+            <div class="modal-field"><label for="custom-role-name">Name</label><input type="text" id="custom-role-name" maxlength="120" value="${customRoleAttribute(role?.name || '')}"></div>
+            <div class="modal-field"><label for="custom-role-description">Description</label><input type="text" id="custom-role-description" maxlength="2000" value="${customRoleAttribute(role?.description || '')}"></div>
+            <div class="modal-field"><label for="custom-role-permissions">Permission keys, separated by commas</label><textarea id="custom-role-permissions">${esc(permissions.map(p => p.key).join(', '))}</textarea></div>
+            <p class="custom-role-note">Only permissions explicitly enabled by the application are accepted. Changes apply to every current grant of this role.</p>`, 'Save role', () => submitCustomRole({
+                action: role ? 'update' : 'create', ownerResourceId: role?.ownerResourceId || $('#custom-role-owner').value,
+                id: role?.id, revision: role?.revision || 0, name: $('#custom-role-name').value,
+                description: $('#custom-role-description').value,
+                permissionKeys: $('#custom-role-permissions').value.split(',').map(x => x.trim()).filter(Boolean)
+            }));
+    }
+
+    function openCustomGrantModal(role, revoke = false) {
+        customRoleDialog(revoke ? 'Revoke customer role' : 'Grant customer role', `
+            <p class="custom-role-note">${esc(role.name)} is owned by ${esc(role.ownerResourceId)}. The target must be inside that resource.</p>
+            <div class="modal-field"><label for="custom-role-subject">Subject ID</label><input type="text" id="custom-role-subject"></div>
+            <div class="modal-field"><label for="custom-role-target">Resource ID</label><input type="text" id="custom-role-target" value="${customRoleAttribute(role.ownerResourceId)}"></div>`, revoke ? 'Revoke access' : 'Grant access', () => submitCustomRole({
+                action: revoke ? 'revoke' : 'grant', ownerResourceId: role.ownerResourceId, id: role.id, revision: role.revision,
+                subjectId: $('#custom-role-subject').value, resourceId: $('#custom-role-target').value
+            }));
+    }
+
+    function openCustomRoleRetirement(role) {
+        customRoleDialog('Retire customer role', `<p class="custom-role-note">Retire ${esc(role.name)} and revoke every grant of this role? Independent roles remain in effect. The definition and audit history are retained.</p>`, 'Retire and revoke', () => submitCustomRole({
+            action: 'retire', ownerResourceId: role.ownerResourceId, id: role.id, revision: role.revision
+        }));
     }
 
     async function loadPermissions(opts = {}) {
@@ -1148,10 +1227,10 @@
             <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
                 <div style="flex:1;min-width:200px">${renderSearchBox('perm-search', 'Search permissions...')}</div>
             </div>
-            <table><thead><tr><th>Key</th><th>Name</th><th>Resource Type</th></tr></thead>
+            <table><thead><tr><th>Key</th><th>Name</th><th>Resource Type</th><th>Custom roles</th></tr></thead>
             <tbody>${rows.map(p => `<tr>
                 <td><code>${esc(p.key)}</code></td><td>${esc(p.name)}</td>
-                <td>${p.resourceType ? `<span class="badge badge-green">${esc(p.resourceType)}</span>` : '-'}</td>
+                <td>${p.resourceType ? `<span class="badge badge-green">${esc(p.resourceType)}</span>` : '-'}</td><td>${p.allowInCustomRoles ? 'Available' : 'Reserved'}</td>
             </tr>`).join('')}</tbody></table>
             <div id="perms-pagination">${renderPagination(pager, result)}</div>
         </div>`;

@@ -10,6 +10,7 @@ using SqlOS.Dashboard;
 using SqlOS.Fga.Configuration;
 using SqlOS.Fga.Interfaces;
 using SqlOS.Fga.Models;
+using SqlOS.Fga.Services;
 using SqlOS.Pagination;
 using SqlOS.Security;
 
@@ -168,6 +169,13 @@ public class SqlOSFgaDashboardMiddleware
             var authService = scope.ServiceProvider.GetRequiredService<ISqlOSFgaAuthService>();
             var trace = await authService.TraceResourceAccessAsync(body.SubjectId, body.ResourceId, body.PermissionKey);
             await context.Response.WriteAsync(JsonSerializer.Serialize(trace, JsonOptions));
+            return;
+        }
+
+        // Operator-authenticated administration uses the same service and tenant policy as SDK callers.
+        if (endpoint == "custom-roles" && context.Request.Method == "POST")
+        {
+            await HandleCustomRole(context);
             return;
         }
 
@@ -859,8 +867,10 @@ public class SqlOSFgaDashboardMiddleware
     {
         var search = context.Request.Query["search"].FirstOrDefault();
 
+        var roleId = context.Request.Query["roleId"].FirstOrDefault();
         var grants = dbContext.Set<SqlOSFgaGrant>().AsQueryable();
 
+        if (!string.IsNullOrEmpty(roleId)) grants = grants.Where(g => g.RoleId == roleId);
         if (!string.IsNullOrEmpty(search))
             grants = grants.Where(g =>
                 (g.Subject != null && g.Subject.DisplayName.Contains(search)) ||
@@ -876,6 +886,7 @@ public class SqlOSFgaDashboardMiddleware
             ResourceId = g.ResourceId,
             RoleName = g.Role != null ? g.Role.Name : g.RoleId,
             RoleId = g.RoleId,
+            IsCustomerRole = g.Role != null && g.Role.DefinitionSource == SqlOSFgaRoleSources.Customer,
             EffectiveFrom = g.EffectiveFrom,
             EffectiveTo = g.EffectiveTo,
             CreatedAt = g.CreatedAt
@@ -885,7 +896,7 @@ public class SqlOSFgaDashboardMiddleware
             query,
             SqlOSKeyset<GrantListRow>.Create().Descending(x => x.CreatedAt).ThenDescending(x => x.Id),
             "fga.grants",
-            SqlOSCursorCodec.Fingerprint(search),
+            SqlOSCursorCodec.Fingerprint(search, roleId),
             context);
         return page.ToResponse();
     }
@@ -906,6 +917,9 @@ public class SqlOSFgaDashboardMiddleware
             Name = r.Name,
             Description = r.Description,
             IsVirtual = r.IsVirtual,
+            DefinitionSource = r.DefinitionSource,
+            OwnerResourceId = r.OwnerResourceId,
+            ArchivedAt = r.ArchivedAt,
             PermissionCount = r.RolePermissions.Count
         });
 
@@ -933,7 +947,8 @@ public class SqlOSFgaDashboardMiddleware
             Key = p.Key,
             Name = p.Name,
             Description = p.Description,
-            ResourceType = p.ResourceType != null ? p.ResourceType.Name : null
+            ResourceType = p.ResourceType != null ? p.ResourceType.Name : null,
+            AllowInCustomRoles = p.AllowInCustomRoles
         });
 
         var page = await ToCursorPageAsync(
@@ -1120,6 +1135,41 @@ public class SqlOSFgaDashboardMiddleware
         await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = SchemaWriteError }, JsonOptions));
     }
 
+    private sealed record CustomRoleRequest(string Action, string OwnerResourceId, string? Id, long Revision,
+        string? Name, string? Description, string[]? PermissionKeys, string? SubjectId, string? ResourceId);
+
+    private static async Task HandleCustomRole(HttpContext context)
+    {
+        try
+        {
+            var body = await JsonSerializer.DeserializeAsync<CustomRoleRequest>(context.Request.Body, JsonOptions, context.RequestAborted);
+            if (body == null || string.IsNullOrWhiteSpace(body.OwnerResourceId)) throw new SqlOSCustomRoleException("invalid_request", "Choose the owner resource.");
+            var service = context.RequestServices.GetRequiredService<SqlOSCustomRoleService>();
+            var actor = context.User.Identity?.Name ?? "dashboard";
+            var write = new SqlOSCustomRoleWrite(body.Name ?? "", body.Description, body.PermissionKeys ?? []);
+            var result = await service.AsOperatorAsync(() => body.Action switch
+            {
+                "create" => service.CreateAsync(actor, body.OwnerResourceId, write, context.RequestAborted),
+                "update" => service.UpdateAsync(actor, body.OwnerResourceId, body.Id ?? "", body.Revision, write, context.RequestAborted),
+                "retire" => service.RetireAsync(actor, body.OwnerResourceId, body.Id ?? "", body.Revision, context.RequestAborted),
+                "grant" => service.GrantAsync(actor, body.OwnerResourceId, body.Id ?? "", body.Revision, body.SubjectId ?? "", body.ResourceId ?? "", context.RequestAborted),
+                "revoke" => service.RevokeAsync(actor, body.OwnerResourceId, body.Id ?? "", body.Revision, body.SubjectId ?? "", body.ResourceId ?? "", context.RequestAborted),
+                _ => throw new SqlOSCustomRoleException("invalid_action", "Choose create, update, retire, grant or revoke.")
+            });
+            await context.Response.WriteAsJsonAsync(result, JsonOptions, context.RequestAborted);
+        }
+        catch (SqlOSCustomRoleException error)
+        {
+            context.Response.StatusCode = error.Code == "forbidden" ? 403 : error.Code == "stale_revision" ? 409 : 400;
+            await context.Response.WriteAsJsonAsync(new { error = error.Code, message = error.Message }, JsonOptions, context.RequestAborted);
+        }
+        catch (JsonException)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsJsonAsync(new { error = "invalid_json" }, context.RequestAborted);
+        }
+    }
+
     private static async Task HandleCreateGrant(HttpContext context, ISqlOSFgaDbContext dbContext)
     {
         var body = await JsonSerializer.DeserializeAsync<CreateGrantRequest>(context.Request.Body, JsonOptions);
@@ -1143,6 +1193,13 @@ public class SqlOSFgaDashboardMiddleware
         {
             context.Response.StatusCode = 400;
             await context.Response.WriteAsync("{\"error\":\"Role not found\"}");
+            return;
+        }
+
+        if (await dbContext.Set<SqlOSFgaRole>().AnyAsync(r => r.Id == body.RoleId && r.DefinitionSource == SqlOSFgaRoleSources.Customer))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsJsonAsync(new { error = "custom_role_service_required", message = "Grant custom roles from the role detail page." });
             return;
         }
 
@@ -1201,6 +1258,13 @@ public class SqlOSFgaDashboardMiddleware
             return;
         }
 
+        if (await dbContext.Set<SqlOSFgaRole>().AnyAsync(r => r.Id == grant.RoleId && r.DefinitionSource == SqlOSFgaRoleSources.Customer))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsJsonAsync(new { error = "custom_role_service_required", message = "Revoke customer role grants through custom role administration with the current revision." });
+            return;
+        }
+
         dbContext.Set<SqlOSFgaGrant>().Remove(grant);
         await dbContext.SaveChangesAsync();
 
@@ -1214,7 +1278,7 @@ public class SqlOSFgaDashboardMiddleware
             .Where(r => r.Id == roleId)
             .Select(r => new
             {
-                r.Id, r.Key, r.Name, r.Description, r.IsVirtual,
+                r.Id, r.Key, r.Name, r.Description, r.IsVirtual, r.DefinitionSource, r.OwnerResourceId, r.Revision, r.ArchivedAt,
                 PermissionCount = r.RolePermissions.Count
             })
             .FirstOrDefaultAsync();
@@ -1297,6 +1361,7 @@ public class SqlOSFgaDashboardMiddleware
 
     private sealed class GrantListRow
     {
+        public bool IsCustomerRole { get; set; }
         public string Id { get; set; } = string.Empty;
         public string SubjectName { get; set; } = string.Empty;
         public string SubjectId { get; set; } = string.Empty;
@@ -1341,11 +1406,15 @@ public class SqlOSFgaDashboardMiddleware
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
         public bool IsVirtual { get; set; }
+        public string DefinitionSource { get; set; } = "application";
+        public string? OwnerResourceId { get; set; }
+        public DateTime? ArchivedAt { get; set; }
         public int PermissionCount { get; set; }
     }
 
     private sealed class PermissionListRow
     {
+        public bool AllowInCustomRoles { get; set; }
         public string Id { get; set; } = string.Empty;
         public string Key { get; set; } = string.Empty;
         public string Name { get; set; } = string.Empty;

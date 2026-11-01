@@ -112,6 +112,7 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
         var resources = Escape(tables.Resources);
         var grants = Escape(tables.Grants);
         var rolePermissions = Escape(tables.RolePermissions);
+        var roles = Escape(tables.Roles);
         var subjects = Escape(tables.Subjects);
         var users = Escape(tables.Users);
         var serviceAccounts = Escape(tables.ServiceAccounts);
@@ -134,6 +135,7 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
                 FROM ancestors a
                 INNER JOIN [{schema}].[{grants}] g ON a.Id = g.ResourceId
                 INNER JOIN [{schema}].[{rolePermissions}] rp ON g.RoleId = rp.RoleId
+                INNER JOIN [{schema}].[{roles}] role ON role.Id = g.RoleId
                 INNER JOIN [{schema}].[{subjects}] s ON g.SubjectId = s.Id
                 LEFT JOIN [{schema}].[{users}] u ON s.Id = u.SubjectId
                 LEFT JOIN [{schema}].[{serviceAccounts}] sa ON s.Id = sa.SubjectId
@@ -141,6 +143,12 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
                 LEFT JOIN [{schema}].[{agents}] ag ON s.Id = ag.SubjectId
                 WHERE g.SubjectId IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
                   AND rp.PermissionId = @PermissionId
+                  AND role.ArchivedAt IS NULL
+                  AND (role.DefinitionSource = 'application' OR (
+                      role.DefinitionSource = 'customer'
+                      AND EXISTS (SELECT 1 FROM ancestors boundary WHERE boundary.Id = role.OwnerResourceId AND boundary.Depth >= a.Depth)
+                      AND EXISTS (SELECT 1 FROM [{schema}].[{Escape(tables.Permissions)}] allowed WHERE allowed.Id = rp.PermissionId AND allowed.AllowInCustomRoles = 1)
+                  ))
                   AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed.CycleDetected = 1)
                   AND NOT EXISTS (
                       SELECT 1
@@ -197,6 +205,7 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
         var resources = Escape(tables.Resources);
         var grants = Escape(tables.Grants);
         var rolePermissions = Escape(tables.RolePermissions);
+        var roles = Escape(tables.Roles);
         var subjects = Escape(tables.Subjects);
         var users = Escape(tables.Users);
         var serviceAccounts = Escape(tables.ServiceAccounts);
@@ -218,6 +227,7 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
                 SELECT DISTINCT g.ResourceId AS NodeId
                 FROM [{schema}].[{grants}] g
                 INNER JOIN [{schema}].[{rolePermissions}] rp ON g.RoleId = rp.RoleId
+                INNER JOIN [{schema}].[{roles}] role ON role.Id = g.RoleId
                 INNER JOIN [{schema}].[{subjects}] s ON g.SubjectId = s.Id
                 INNER JOIN [{schema}].[{resources}] node ON node.Id = g.ResourceId
                 LEFT JOIN [{schema}].[{users}] u ON s.Id = u.SubjectId
@@ -226,6 +236,12 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
                 LEFT JOIN [{schema}].[{agents}] ag ON s.Id = ag.SubjectId
                 WHERE g.SubjectId IN (SELECT CONVERT(NVARCHAR(450), [value]) FROM OPENJSON(@SubjectIds))
                   AND rp.PermissionId = @PermissionId
+                  AND role.ArchivedAt IS NULL
+                  AND (role.DefinitionSource = 'application' OR (
+                      role.DefinitionSource = 'customer'
+                      AND EXISTS (SELECT 1 FROM [{schema}].fn_ResourceAncestors(g.ResourceId) boundary WHERE boundary.NodeId = role.OwnerResourceId)
+                      AND EXISTS (SELECT 1 FROM [{schema}].[{Escape(tables.Permissions)}] allowed WHERE allowed.Id = rp.PermissionId AND allowed.AllowInCustomRoles = 1)
+                  ))
                   AND node.IsActive = 1
                   {BuildSubjectActivityConditions(options)}
                   AND (g.EffectiveFrom IS NULL OR g.EffectiveFrom <= GETUTCDATE())

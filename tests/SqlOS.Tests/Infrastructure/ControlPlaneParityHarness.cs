@@ -82,8 +82,10 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
         Authorization = AuthorizationServer;
         Auth = scope.ServiceProvider.GetRequiredService<SqlOSAuthService>();
         Fga = scope.ServiceProvider.GetRequiredService<SqlOS.Fga.Interfaces.ISqlOSFgaAuthService>();
+        FgaOptions = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<SqlOS.Fga.Configuration.SqlOSFgaOptions>>().Value;
     }
 
+    public SqlOS.Fga.Configuration.SqlOSFgaOptions FgaOptions { get; }
     public HttpClient Client { get; }
     public TestSqlOSInMemoryDbContext Context { get; }
     public SqlOSAuthServerOptions Options { get; }

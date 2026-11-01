@@ -53,6 +53,16 @@ public class SqlOSFgaSeedService
     {
         _logger.LogInformation("Seeding authorization data...");
 
+        // Validate ownership before staging or saving any startup changes.
+        var declaredRoles = data.Roles?.ToArray() ?? [];
+        if (declaredRoles.Any(role => role.DefinitionSource != SqlOSFgaRoleSources.Application || role.OwnerResourceId != null || role.ArchivedAt != null))
+            throw new InvalidOperationException("Startup seeds may only declare application-owned roles.");
+        var ids = declaredRoles.Select(role => role.Id).ToArray();
+        var mappedKeys = data.RolePermissions?.Select(mapping => mapping.RoleKey).ToArray() ?? [];
+        if (await _context.Set<SqlOSFgaRole>().AnyAsync(role => role.DefinitionSource != SqlOSFgaRoleSources.Application
+            && (ids.Contains(role.Id) || mappedKeys.Contains(role.Key)), cancellationToken))
+            throw new InvalidOperationException("Startup cannot change a customer role's ownership or permissions.");
+
         if (data.ResourceTypes != null)
         {
             foreach (var rt in data.ResourceTypes)
@@ -79,7 +89,11 @@ public class SqlOSFgaSeedService
         {
             foreach (var role in data.Roles)
             {
+                if (role.DefinitionSource != SqlOSFgaRoleSources.Application || role.OwnerResourceId != null || role.ArchivedAt != null)
+                    throw new InvalidOperationException("Startup seeds may only declare application-owned roles.");
                 var existing = await _context.Set<SqlOSFgaRole>().FindAsync(new object[] { role.Id }, cancellationToken);
+                if (existing != null && existing.DefinitionSource != SqlOSFgaRoleSources.Application)
+                    throw new InvalidOperationException("Startup cannot take ownership of a customer role.");
                 if (existing == null)
                 {
                     _context.Set<SqlOSFgaRole>().Add(new SqlOSFgaRole
@@ -114,7 +128,8 @@ public class SqlOSFgaSeedService
                         Key = perm.Key,
                         Name = perm.Name,
                         Description = perm.Description,
-                        ResourceTypeId = perm.ResourceTypeId
+                        ResourceTypeId = perm.ResourceTypeId,
+                        AllowInCustomRoles = perm.AllowInCustomRoles
                     });
                 }
                 else
@@ -123,6 +138,7 @@ public class SqlOSFgaSeedService
                     existing.Name = perm.Name;
                     existing.Description = perm.Description;
                     existing.ResourceTypeId = perm.ResourceTypeId;
+                    existing.AllowInCustomRoles = perm.AllowInCustomRoles;
                 }
             }
         }
@@ -139,6 +155,9 @@ public class SqlOSFgaSeedService
                     _logger.LogWarning("Role with key {RoleKey} not found for role-permission mapping", roleKey);
                     continue;
                 }
+
+                if (role.DefinitionSource != SqlOSFgaRoleSources.Application)
+                    throw new InvalidOperationException("Startup cannot change a customer role's permissions.");
 
                 foreach (var permKey in permissionKeys)
                 {

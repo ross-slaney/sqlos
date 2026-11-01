@@ -29,7 +29,7 @@ builder.AddSqlOS<AppDbContext>(options =>
 });
 ```
 
-Roles defined in startup are the authorization model. Change them in `options.Fga.Seed` and restart. The dashboard does not create, edit, or delete roles.
+Roles defined in startup are the authorization model. Change them in `options.Fga.Seed` and restart. The dashboard displays these built-in definitions read-only.
 
 ## Dashboard
 
@@ -59,3 +59,99 @@ public class SqlOSFgaRole
 | Chain Manager | `ChainManager` | CHAIN_VIEW, LOCATION_VIEW, LOCATION_EDIT, INVENTORY_VIEW, INVENTORY_EDIT |
 | Store Manager | `StoreManager` | LOCATION_VIEW, INVENTORY_VIEW, INVENTORY_EDIT |
 | Store Clerk | `StoreClerk` | INVENTORY_VIEW |
+
+## Customer-owned roles
+
+A customer role uses the same role, permission-link, and grant tables as a built-in role. Its
+`DefinitionSource` is `customer`, its immutable `OwnerResourceId` identifies the owning resource,
+and its generated ID is used in grants. Names are display text, not identifiers. Built-in roles
+remain `application` definitions and cannot be changed through customer administration.
+
+The application explicitly enables available permissions after declaring them:
+
+```csharp
+options.Fga.Seed(seed =>
+{
+    seed.Permission("CHECKLIST_ASSIGN", "Assign work", "checklist");
+    seed.Permission("CHECKLIST_FINISH", "Finish a checklist", "checklist");
+    seed.AllowInCustomRoles("CHECKLIST_ASSIGN", "CHECKLIST_FINISH");
+});
+```
+
+Configure `Fga.CustomRoles.ManagePermission`, `OwnerResourceTypes`, and
+`IsEligibleRecipientAsync` before enabling administration. The management permission must not
+be selectable in customer roles. The recipient policy must validate current organization
+membership (including squads); do not compare resource ID prefixes or assume a user belongs to
+only one organization. With missing policy, administration fails closed.
+
+Use `SqlOSCustomRoleService` with a principal obtained from authenticated server context:
+
+```csharp
+var role = await roles.CreateAsync(callerPrincipalId, organizationResourceId,
+    new SqlOSCustomRoleWrite("Cleaning supervisor", null,
+        ["CHECKLIST_ASSIGN", "CHECKLIST_FINISH"]), cancellationToken);
+await roles.GrantAsync(callerPrincipalId, organizationResourceId,
+    role.Id, role.Revision, supervisorsSubjectId, organizationResourceId, cancellationToken);
+```
+
+A grant may target the owner or its descendants, never another organization's tree. Do not use
+the ordinary `GrantRoleAsync` helper for a customer role: the administration service also checks
+recipient eligibility, serializes changes and records audit history.
+
+`ListAsync` returns a bounded, owner-scoped cursor page of definitions. `ListGrantsAsync` returns a bounded page of the selected role's grants, after checking the caller and owner; use it to show who an edit will affect.
+
+`UpdateAsync` replaces the permission set and requires the last observed revision. Changes
+apply to all existing holders. Grants and revocations also advance the revision. A stale request
+returns `stale_revision`; reload rather than blindly replaying it. `RetireAsync` removes the role's
+grants, archives the definition and preserves audit history. Built-in ownership and assignment
+grants are unaffected by these operations.
+
+Point checks, access traces and authorized-list functions reject archived customer roles,
+unapproved permissions and grants outside the owner's subtree. Moving a granted resource
+outside that subtree makes that custom grant ineffective; an ordinary grant does not acquire
+authority in the new organization. Unsupported direct table writes are not a management API.
+
+The service commits its own transaction when called alone. Inside an existing transaction it
+uses a savepoint; the caller then owns the final commit. Role changes and their SqlOS audit records
+commit or roll back together. Save staged changes before calling it, and discard tracked state
+after a failed operation.
+
+Use `WithOwnerTransactionAsync` for membership changes or offboarding that alter who can hold a
+role. In that callback, change the host's membership and revoke its custom-role grants using the
+same scoped DbContext and service. Save staged membership changes before nested role operations.
+The shared owner lock prevents concurrent grants from passing an eligibility check during that
+change, and a failure rolls back membership, role grants and their audit records together.
+Its public actor-based API is suitable for application adapters. The authenticated operator
+dashboard uses the same service through `POST /sqlos/admin/fga/api/custom-roles`; it records an
+operator actor and still enforces owner, recipient, permission, revision and lifecycle rules.
+The JSON `action` is `create`, `update`, `grant`, `revoke` or `retire`, with `ownerResourceId`,
+`id`, `revision`, and the corresponding definition or grant fields. Operator endpoints are not
+customer endpoints and must never be exposed as an organization administration shortcut.
+
+The Roles dashboard distinguishes application and customer definitions. Customer role details
+provide editing, granting and retirement; application definitions stay read-only. Existing
+startup seeds never overwrite a customer's definition. Customer definitions are not seeded:
+applications seed the permission vocabulary and manage runtime customer choices through the service.
+
+When an organization removes a member, its application must revoke direct custom-role grants as part of offboarding. Recipient eligibility is checked when granting; it is not a dynamic membership predicate in every SQL read. Removing someone from a squad immediately removes access inherited through that squad, while other independent grants still apply.
+
+
+## Upgrading an existing deployment
+
+Upgrade every process that evaluates FGA or initializes its database functions before creating
+customer roles. Older versions do not enforce customer ownership or permission eligibility and
+can replace the SQL functions on startup. Keep customer administration disabled until that
+upgrade is complete; do not roll back to an older FGA runtime while serving customer-role grants.
+The schema additions preserve existing built-in roles and grants as application-owned definitions.
+
+The owning resource is retained while definitions refer to it. Deactivate that resource to close
+its subtree; do not hard-delete an organization resource while retaining its role definitions.
+A host must also authorize squad membership changes: anyone allowed to add a member to a squad
+can give that person every role held by the squad. The grant recipient policy does not replace
+that membership policy.
+
+### Membership save hooks
+
+A host that reconciles membership and grants inside `SaveChanges` already has staged membership changes. Begin or join the host transaction and call `SqlOSCustomRoleService.LockOwnerAsync(db, ownerResourceId)` **before reading grants to remove**. This is a trusted lifecycle coordination API: it does not authorize membership changes, save rows, or replace the host's membership audit. Lock multiple owners in ordinal order and retain the transaction through the final save/commit. Relational calls without a transaction fail; in-memory fixtures provide no concurrency guarantee.
+
+For offboarding, reconcile the recipient's customer grants by the role's `OwnerResourceId` as well as the application's normal node relationships, so a previously moved grant cannot be revived later. The membership change and removal of those grants must commit together. Role administration remains through the management service; this hook lets the host's existing membership reconciliation share its lock without pretending a staged membership change is an interactive role edit.

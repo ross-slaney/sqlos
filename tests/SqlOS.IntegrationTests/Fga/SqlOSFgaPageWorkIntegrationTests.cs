@@ -7,6 +7,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.Fga.Extensions;
+using SqlOS.Fga.Models;
+using SqlOS.Extensions;
 using SqlOS.IntegrationTests.Fga.Infrastructure;
 using SqlOS.IntegrationTests.Infrastructure;
 
@@ -82,6 +84,34 @@ public class SqlOSFgaPageWorkIntegrationTests
         commands.Load.Should().ContainSingle();
         capture.Commands.Should().HaveCount(5, "two statements resolve the caller and the permission, then the page runs three");
 
+        (await EntryRowsReadAsync(commands.Read2[0], PageOrderTestDbContext.WorkItemEntries))
+            .Should().BeLessThanOrEqualTo(PageSize);
+    }
+
+    [TestMethod]
+    public async Task CustomerRoleSparseCaller_StillReadsAboutAPageOfEntries()
+    {
+        var capture = new CommandCapture();
+        await using var context = PageOrderFixture.CreateContext();
+        var subject = "custom-page-member";
+        await context.ProvisionUserSubjectAsync(subject, "Custom page member");
+        var permission = await context.Set<SqlOSFgaPermission>().SingleAsync(x => x.Key == PageOrderFixture.ViewPermission);
+        permission.AllowInCustomRoles = true;
+        context.Set<SqlOSFgaRole>().Add(new() { Id = "custom-page-role", Key = "custom-page-role", Name = "Custom reader",
+            DefinitionSource = SqlOSFgaRoleSources.Customer, OwnerResourceId = FgaTestDataSeeder.TestProjectResourceId });
+        context.Set<SqlOSFgaRolePermission>().Add(new() { RoleId = "custom-page-role", PermissionId = permission.Id });
+        context.Set<SqlOSFgaGrant>().Add(new() { Id = "custom-page-grant", SubjectId = subject,
+            ResourceId = FgaTestDataSeeder.TestProjectResourceId, RoleId = "custom-page-role" });
+        await context.SaveChangesAsync();
+        await using var captured = PageOrderFixture.CreateContext(null, capture);
+        var page = await captured.WorkItems.AsNoTracking().OrderBy(item => item.Rank)
+            .ToPageAsync(subject, PageOrderFixture.ViewPermission, PageSize);
+        page.Data.Select(item => item.Rank).Should().Equal(5_000, 5_001, 5_002);
+        var commands = Classify(capture.Commands);
+        commands.Read1.Should().ContainSingle();
+        commands.Read2.Should().ContainSingle();
+        commands.Load.Should().ContainSingle();
+        capture.Commands.Should().HaveCount(5);
         (await EntryRowsReadAsync(commands.Read2[0], PageOrderTestDbContext.WorkItemEntries))
             .Should().BeLessThanOrEqualTo(PageSize);
     }
