@@ -16,6 +16,10 @@ public class SqlOSFgaFunctionInitializerTests
 
         sql.Should().Contain("CREATE OR ALTER FUNCTION");
         sql.Should().NotContain("DROP FUNCTION");
+        // Point checks already have the target's ancestors. Rewalking a grant's ancestors through
+        // another function both repeats work and creates a DDL/read lock cycle at startup.
+        sql.Should().NotContain("fn_ResourceAncestors");
+        sql.Should().Contain("boundary.Depth >= a.Depth");
         sql.Should().Contain("CycleDetected");
         sql.Should().Contain("CHARINDEX");
         sql.Should().Contain("malformed.CycleDetected = 1");

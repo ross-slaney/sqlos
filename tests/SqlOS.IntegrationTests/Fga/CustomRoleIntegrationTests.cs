@@ -63,6 +63,16 @@ public class CustomRoleIntegrationTests
             (await db.IsResourceAccessible("work", subjects, "ASSIGN").AnyAsync()).Should().BeTrue();
             (await db.PageNodes(subjects, "ASSIGN").Select(x => x.NodeId).ToListAsync()).Should().Equal("work");
             (await db.PageNodes(subjects, "FINISH").AnyAsync()).Should().BeFalse();
+            // Even a corrupt grant above its owner must not authorize a target inside that owner.
+            // The owner being an ancestor of the target is insufficient: it must contain the grant.
+            var misplaced = await db.Set<SqlOSFgaGrant>().SingleAsync(x => x.RoleId == role.Id);
+            misplaced.ResourceId = "root";
+            await db.SaveChangesAsync();
+            (await db.IsResourceAccessible("work", subjects, "ASSIGN").AnyAsync()).Should().BeFalse();
+            (await db.PageNodes(subjects, "ASSIGN").AnyAsync()).Should().BeFalse();
+            misplaced.ResourceId = "work";
+            await db.SaveChangesAsync();
+            (await db.IsResourceAccessible("work", subjects, "ASSIGN").AnyAsync()).Should().BeTrue();
             role = await service.UpdateAsync("admin", "acme", role.Id, role.Revision, new("Relief", null, ["FINISH"]));
             (await db.IsResourceAccessible("work", subjects, "ASSIGN").AnyAsync()).Should().BeFalse();
             (await db.PageNodes(subjects, "FINISH").AnyAsync()).Should().BeTrue();

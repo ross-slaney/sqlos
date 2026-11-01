@@ -131,7 +131,7 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
               AND role."ArchivedAt" IS NULL
               AND (role."DefinitionSource" = 'application' OR (
                   role."DefinitionSource" = 'customer'
-                  AND EXISTS (SELECT 1 FROM {schema}."fn_ResourceAncestors"(g."ResourceId") boundary WHERE boundary."NodeId" = role."OwnerResourceId")
+                  AND EXISTS (SELECT 1 FROM ancestors boundary WHERE boundary."Id" = role."OwnerResourceId" AND boundary."Depth" >= a."Depth")
                   AND EXISTS (SELECT 1 FROM {Qualify(options.Schema, tables.Permissions)} allowed WHERE allowed."Id" = rp."PermissionId" AND allowed."AllowInCustomRoles" = TRUE)
               ))
               AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed."CycleDetected" = TRUE)
