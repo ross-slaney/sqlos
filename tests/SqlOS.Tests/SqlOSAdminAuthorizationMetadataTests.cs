@@ -89,6 +89,7 @@ public sealed class SqlOSAdminAuthorizationMetadataTests
 
         var responses = new[]
         {
+            await client.PostAsJsonAsync("/sqlos/admin/fga/api/custom-roles", new { action = "create", ownerResourceId = "victim" }),
             await client.GetAsync("/sqlos/admin/auth/api/stats"),
             await client.PostAsJsonAsync("/sqlos/admin/auth/api/users", new { }),
             await client.PostAsJsonAsync("/sqlos/admin/auth/api/sessions/revocation/preview", new { userId = "victim" }),

@@ -119,7 +119,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
                 foreach (var grant in grants)
                 {
                     var role = await _context.Set<SqlOSFgaRole>().FirstOrDefaultAsync(r => r.Id == grant.RoleId);
-                    if (role == null) continue;
+                    if (role == null || !await SqlOSCustomRoleBoundary.AllowsAsync(_context, role, grant.ResourceId, permission.Id)) continue;
 
                     var roleHasPermission = await _context.Set<SqlOSFgaRolePermission>()
                         .AnyAsync(rp => rp.RoleId == role.Id && rp.PermissionId == permission.Id);
@@ -261,7 +261,7 @@ public class SqlOSFgaAuthService : ISqlOSFgaAuthService
             foreach (var grant in grantsOnNode)
             {
                 var role = grant.Role;
-                if (role == null) continue;
+                if (role == null || !await SqlOSCustomRoleBoundary.AllowsAsync(_context, role, grant.ResourceId, permission.Id)) continue;
 
                 var rolePermissions = await _context.Set<SqlOSFgaRolePermission>()
                     .Include(rp => rp.Permission)

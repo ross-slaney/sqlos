@@ -108,6 +108,11 @@ public static class SqlOSFgaModelConfiguration
         {
             entity.ToTable(tables.Roles, schema, t => t.ExcludeFromMigrations());
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.DefinitionSource).HasMaxLength(16).HasDefaultValue(SqlOSFgaRoleSources.Application);
+            entity.Property(e => e.Revision).HasDefaultValue(1L).IsConcurrencyToken();
+            entity.Property(e => e.OwnerResourceId).HasMaxLength(450);
+            entity.HasIndex(e => e.OwnerResourceId);
+            entity.HasOne<SqlOSFgaResource>().WithMany().HasForeignKey(e => e.OwnerResourceId).OnDelete(DeleteBehavior.Restrict);
         });
 
         // Permission

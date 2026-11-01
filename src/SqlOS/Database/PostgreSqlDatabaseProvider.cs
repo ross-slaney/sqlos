@@ -97,6 +97,7 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         var resources = Qualify(options.Schema, tables.Resources);
         var grants = Qualify(options.Schema, tables.Grants);
         var rolePermissions = Qualify(options.Schema, tables.RolePermissions);
+        var roles = Qualify(options.Schema, tables.Roles);
         var subjects = Qualify(options.Schema, tables.Subjects);
         var users = Qualify(options.Schema, tables.Users);
         var serviceAccounts = Qualify(options.Schema, tables.ServiceAccounts);
@@ -119,6 +120,7 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             FROM ancestors a
             INNER JOIN {grants} g ON a."Id" = g."ResourceId"
             INNER JOIN {rolePermissions} rp ON g."RoleId" = rp."RoleId"
+            INNER JOIN {roles} role ON role."Id" = g."RoleId"
             INNER JOIN {subjects} s ON g."SubjectId" = s."Id"
             LEFT JOIN {users} u ON s."Id" = u."SubjectId"
             LEFT JOIN {serviceAccounts} sa ON s."Id" = sa."SubjectId"
@@ -126,6 +128,12 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             LEFT JOIN {agents} ag ON s."Id" = ag."SubjectId"
             WHERE g."SubjectId" IN (SELECT jsonb_array_elements_text(p_subject_ids::jsonb))
               AND rp."PermissionId" = p_permission_id
+              AND role."ArchivedAt" IS NULL
+              AND (role."DefinitionSource" = 'application' OR (
+                  role."DefinitionSource" = 'customer'
+                  AND EXISTS (SELECT 1 FROM {schema}."fn_ResourceAncestors"(g."ResourceId") boundary WHERE boundary."NodeId" = role."OwnerResourceId")
+                  AND EXISTS (SELECT 1 FROM {Qualify(options.Schema, tables.Permissions)} allowed WHERE allowed."Id" = rp."PermissionId" AND allowed."AllowInCustomRoles" = TRUE)
+              ))
               AND NOT EXISTS (SELECT 1 FROM ancestors malformed WHERE malformed."CycleDetected" = TRUE)
               AND NOT EXISTS (
                   SELECT 1
@@ -182,6 +190,7 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         var tables = options.TableNames;
         var grants = Qualify(options.Schema, tables.Grants);
         var rolePermissions = Qualify(options.Schema, tables.RolePermissions);
+        var roles = Qualify(options.Schema, tables.Roles);
         var subjects = Qualify(options.Schema, tables.Subjects);
         var users = Qualify(options.Schema, tables.Users);
         var serviceAccounts = Qualify(options.Schema, tables.ServiceAccounts);
@@ -214,6 +223,7 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             SELECT DISTINCT g."ResourceId" AS "NodeId"
             FROM {grants} g
             INNER JOIN {rolePermissions} rp ON g."RoleId" = rp."RoleId"
+            INNER JOIN {roles} role ON role."Id" = g."RoleId"
             INNER JOIN {subjects} s ON g."SubjectId" = s."Id"
             LEFT JOIN {users} u ON s."Id" = u."SubjectId"
             LEFT JOIN {serviceAccounts} sa ON s."Id" = sa."SubjectId"
@@ -221,6 +231,12 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
             LEFT JOIN {agents} ag ON s."Id" = ag."SubjectId"
             WHERE g."SubjectId" IN (SELECT jsonb_array_elements_text(p_subject_ids::jsonb))
               AND rp."PermissionId" = p_permission_id
+              AND role."ArchivedAt" IS NULL
+              AND (role."DefinitionSource" = 'application' OR (
+                  role."DefinitionSource" = 'customer'
+                  AND EXISTS (SELECT 1 FROM {schema}."fn_ResourceAncestors"(g."ResourceId") boundary WHERE boundary."NodeId" = role."OwnerResourceId")
+                  AND EXISTS (SELECT 1 FROM {Qualify(options.Schema, tables.Permissions)} allowed WHERE allowed."Id" = rp."PermissionId" AND allowed."AllowInCustomRoles" = TRUE)
+              ))
               {BuildSubjectActivityConditions(options)}
               AND (g."EffectiveFrom" IS NULL OR g."EffectiveFrom" <= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
               AND (g."EffectiveTo" IS NULL OR g."EffectiveTo" >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))

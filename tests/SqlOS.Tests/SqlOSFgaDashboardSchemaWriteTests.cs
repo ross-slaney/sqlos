@@ -127,6 +127,18 @@ public sealed class SqlOSFgaDashboardSchemaWriteTests
         (await harness.CountGrantsAsync()).Should().Be(1);
     }
 
+    [TestMethod]
+    public async Task CustomerRoleMutation_WithDashboardCookieAndHostileOrigin_IsRejectedBeforeAdministration()
+    {
+        await using var harness = await FgaDashboardHarness.CreateAsync();
+        var rejected = await harness.SendAsync(HttpMethods.Post, "/sqlos/admin/fga/api/custom-roles",
+            """{"action":"create","ownerResourceId":"victim","name":"Injected","permissionKeys":[]}""",
+            "SqlOS.Dashboard.Session=ambient-dashboard-session", "https://evil.example.test", csrfHeader: true);
+        rejected.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        rejected.Body.Should().Contain("csrf_rejected").And.NotContain("ambient-dashboard-session");
+        (await harness.CountGrantsAsync()).Should().Be(0);
+    }
+
     private static async Task AssertSchemaWriteRejectedAsync(FgaDashboardResponse response)
     {
         response.StatusCode.Should().Be(StatusCodes.Status405MethodNotAllowed);

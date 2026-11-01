@@ -17,6 +17,7 @@ public class SqlOSFgaOptions
     public int MaxResourceHierarchyDepth { get; set; } = 10;
     public SqlOSDashboardOptions Dashboard { get; set; } = new();
     public SqlOSFgaTableNames TableNames { get; set; } = new();
+    public SqlOSCustomRoleOptions CustomRoles { get; } = new();
     public SqlOSFgaSeedData? StartupSeedData { get; private set; }
 
     /// <summary>

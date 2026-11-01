@@ -31,8 +31,8 @@ public class SqlOSFgaFunctionInitializer
         // fn_PageNodes calls fn_ResourceAncestors, so the ancestors function is installed first.
         var functions = new (string Name, string Sql)[]
         {
-            ("fn_IsResourceAccessible", provider.BuildIsResourceAccessibleFunctionSql(_options)),
             ("fn_ResourceAncestors", provider.BuildResourceAncestorsFunctionSql(_options)),
+            ("fn_IsResourceAccessible", provider.BuildIsResourceAccessibleFunctionSql(_options)),
             ("fn_PageNodes", provider.BuildPageNodesFunctionSql(_options)),
         };
 

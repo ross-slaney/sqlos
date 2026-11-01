@@ -749,7 +749,11 @@ public sealed class SqlOSResourceEntitySyncTests
                 "Key" TEXT NOT NULL,
                 Name TEXT NOT NULL,
                 Description TEXT NULL,
-                IsVirtual INTEGER NOT NULL
+                IsVirtual INTEGER NOT NULL,
+                DefinitionSource TEXT NOT NULL DEFAULT 'application',
+                OwnerResourceId TEXT NULL,
+                Revision INTEGER NOT NULL DEFAULT 1,
+                ArchivedAt TEXT NULL
             );
             """);
         await context.Database.ExecuteSqlRawAsync("""

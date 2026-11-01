@@ -352,6 +352,9 @@ public static class SqlOSErgonomicsExtensions
         await FindRequiredResourceOrPendingEntityAsync(context, normalizedResourceId, cancellationToken);
         var roleId = await ResolveRoleIdAsync(context, roleKeyOrId, cancellationToken);
 
+        var role = await context.Set<SqlOSFgaRole>().FindAsync(new object[] { roleId }, cancellationToken);
+        if (role?.DefinitionSource == SqlOSFgaRoleSources.Customer)
+            throw new InvalidOperationException("Use SqlOSCustomRoleService to revoke customer roles with revision checks and audit history.");
         var grant = await FindGrantAsync(
             context,
             normalizedSubjectId,
@@ -382,6 +385,10 @@ public static class SqlOSErgonomicsExtensions
         var roleId = roleAlreadyResolved
             ? RequireValue(roleKeyOrId, nameof(roleKeyOrId))
             : await ResolveRoleIdAsync(context, roleKeyOrId, cancellationToken);
+
+        var resolvedRole = await context.Set<SqlOSFgaRole>().FindAsync(new object[] { roleId }, cancellationToken);
+        if (resolvedRole?.DefinitionSource == SqlOSFgaRoleSources.Customer)
+            throw new InvalidOperationException("Use SqlOSCustomRoleService to grant customer-owned roles with tenant and recipient validation.");
 
         var grant = await FindGrantAsync(
             context,
