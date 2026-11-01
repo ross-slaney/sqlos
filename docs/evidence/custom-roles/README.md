@@ -22,3 +22,11 @@ The fixture was restarted while improving the dashboard, so generated role IDs d
 Automated coverage additionally exercises all three roles' selected and omitted capabilities, foreign actors and recipients, startup reconciliation, stale edits, membership removal, independent ownership grants, archived-role resurrection attempts, raw foreign grants, resource moves, service/dashboard parity, unauthenticated and CSRF rejection, bounded role lists, concurrent writers, audit rollback, and composing host offboarding with grant revocation in one transaction. Exact final commands and results belong in the PR description.
 
 ChecklistSquad acceptance remains separate: actual signed-in persona journeys, checklist and template mutations, recurring ownership, offline recovery, assistant/platform tools, help pages, six surfaces and its own coverage/E2E gates.
+
+## 11.2.0 release compatibility
+
+Manually completed hosted signup in the local Todo example at ports 5280/5290: the owned ASP.NET client returned with its application session and `GET /api/me` returned 200 with the expected Todo resource audience. [Browser proof](hosted-owned-app.jpg).
+
+Also invoked and reviewed five real-SQL HTTP journeys in `SqlOS.Todo.IntegrationTests`: hosted signup/token/resource read; headless signup/token/resource read; protected-resource metadata and unauthenticated challenge; trusted CIMD authorization-code flow; enabled DCR registration and authorization-code flow. All five passed. CIMD uses a controlled metadata HTTP fixture rather than a public external client. This evidence does not claim a live third-party identity-provider or internet-client test.
+
+Command: `dotnet test examples/SqlOS.Todo.IntegrationTests --filter 'FullyQualifiedName~HostedSignup_IssuesResourceBoundToken|FullyQualifiedName~HeadlessFollowOn_CanCreateUser|FullyQualifiedName~CimdClient_CanCompleteAuthorizationFlow|FullyQualifiedName~Dcr|FullyQualifiedName~ProtectedResourceMetadata|FullyQualifiedName~Audience' --logger 'console;verbosity=normal'`.
