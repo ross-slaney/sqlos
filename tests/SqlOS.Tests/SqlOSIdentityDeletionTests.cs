@@ -70,4 +70,19 @@ public sealed class SqlOSIdentityDeletionTests
         await FluentActions.Invoking(() => service.DeleteOrganizationAsync("missing", "u", true)).Should().ThrowAsync<InvalidOperationException>();
         await FluentActions.Invoking(() => service.DeleteUserAsync("u", "", true)).Should().ThrowAsync<ArgumentException>();
     }
+    [TestMethod]
+    public async Task MembershipPreparation_RunsBeforeDeactivation_AndOnlyOnce()
+    {
+        await using var db = Context(); await Seed(db); var service = new SqlOSIdentityDeletionService(db, []);
+        var calls = 0;
+        async Task Prepare(CancellationToken ct) {
+            (await db.Set<SqlOSMembership>().FindAsync(["o", "u"], ct))!.IsActive.Should().BeTrue();
+            calls++;
+        }
+        await service.RemoveMembershipAsync("o", "u", "u", true, prepare: Prepare);
+        await service.RemoveMembershipAsync("o", "u", "u", true, prepare: Prepare);
+        calls.Should().Be(1);
+        (await db.Set<SqlOSMembership>().FindAsync("o", "u"))!.IsActive.Should().BeFalse();
+    }
+
 }
