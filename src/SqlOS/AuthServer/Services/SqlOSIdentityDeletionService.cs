@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
@@ -16,8 +17,8 @@ public interface ISqlOSIdentityDeletionParticipant
 
 public sealed record SqlOSIdentityDeletionResult(string Id, DateTime DeletedAt, bool AlreadyDeleted);
 
-/// <summary>Terminal identity deletion. Anonymous identifiers and security audit remain;
-/// credentials, sign-in identities and memberships are removed. Trusted hosts authorize their own callers
+/// <summary>Soft identity deletion. Identity data, credentials, memberships and audit remain;
+/// deleted identities cannot sign in, and memberships and sessions are deactivated. Trusted hosts authorize their own callers
 /// before invoking this service. Operator HTTP routes use the same service and host participants.</summary>
 public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext context,
     IEnumerable<ISqlOSIdentityDeletionParticipant> participants)
@@ -33,19 +34,10 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
         var now = DateTime.UtcNow;
         await SqlOSAuthLifecyclePolicy.RevokeAsync(context, userId, null, "account_deleted", now,
             SqlOSAuthLifecycleRevocationScope.Offboarding, cancellationToken);
-        await RemoveAsync<SqlOSEmailOtpChallenge>(x => x.UserId == userId, cancellationToken);
-        await RemoveAsync<SqlOSPhoneOtpChallenge>(x => x.UserId == userId, cancellationToken);
-        await RemoveAsync<SqlOSUserEmail>(x => x.UserId == userId, cancellationToken);
-        await RemoveAsync<SqlOSUserPhoneNumber>(x => x.UserId == userId, cancellationToken);
-        await RemoveAsync<SqlOSCredential>(x => x.UserId == userId, cancellationToken);
-        await RemoveAsync<SqlOSExternalIdentity>(x => x.UserId == userId, cancellationToken);
-        await RemoveAsync<SqlOSUserAuthenticator>(x => x.UserId == userId, cancellationToken);
-        await RemoveAsync<SqlOSRecoveryCode>(x => x.UserId == userId, cancellationToken);
-        await RemoveAsync<SqlOSMembership>(x => x.UserId == userId, cancellationToken);
+        foreach (var membership in await context.Set<SqlOSMembership>().Where(x => x.UserId == userId).ToListAsync(cancellationToken))
+            membership.IsActive = false;
         user.IsActive = false;
         user.DeletedAt = now;
-        user.DisplayName = "Deleted account";
-        user.DefaultEmail = null;
         user.UpdatedAt = now;
         Audit("identity.user.deleted", actorId, userId, null, now);
         await context.SaveChangesAsync(cancellationToken);
@@ -66,7 +58,7 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
             SqlOSAuthLifecycleRevocationScope.Offboarding, cancellationToken);
         foreach (var invitation in await context.Set<SqlOSInvitation>().Where(x => x.OrganizationId == organizationId && x.AcceptedAt == null && x.RevokedAt == null).ToListAsync(cancellationToken))
             invitation.RevokedAt = now;
-        if (context is DbContext modelContext && modelContext.Model.FindEntityType(typeof(SqlOSFgaServiceAccount)) != null)
+        if (await HasServiceAccountTableAsync(cancellationToken))
         {
             var accounts = await context.Set<SqlOSFgaServiceAccount>().Where(x => x.Subject!.OrganizationId == organizationId).ToListAsync(cancellationToken);
             var clientIds = accounts.Select(x => x.ClientId).ToList();
@@ -74,17 +66,14 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
             foreach (var client in await context.Set<SqlOSClientApplication>().Where(x => clientIds.Contains(x.ClientId)).ToListAsync(cancellationToken))
             { client.IsActive = false; client.DisabledAt = now; client.DisabledReason = "organization_deleted"; }
         }
-        await RemoveAsync<SqlOSMembership>(x => x.OrganizationId == organizationId, cancellationToken);
-        await RemoveAsync<SqlOSOrganizationDomain>(x => x.OrganizationId == organizationId, cancellationToken);
+        foreach (var membership in await context.Set<SqlOSMembership>().Where(x => x.OrganizationId == organizationId).ToListAsync(cancellationToken))
+            membership.IsActive = false;
         foreach (var connection in await context.Set<SqlOSSsoConnection>().Where(x => x.OrganizationId == organizationId).ToListAsync(cancellationToken))
             connection.IsEnabled = false;
         foreach (var connection in await context.Set<SqlOSScimConnection>().Where(x => x.OrganizationId == organizationId).ToListAsync(cancellationToken))
             connection.IsEnabled = false;
         organization.IsActive = false;
         organization.DeletedAt = now;
-        organization.Name = "Deleted organization";
-        organization.PrimaryDomain = null;
-        organization.Slug = "deleted-" + Guid.NewGuid().ToString("N");
         Audit("identity.organization.deleted", actorId, null, organizationId, now);
         await context.SaveChangesAsync(cancellationToken);
         return new SqlOSIdentityDeletionResult(organizationId, now, false);
@@ -105,8 +94,17 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
         return true;
     }, cancellationToken);
 
-    private async Task RemoveAsync<T>(System.Linq.Expressions.Expression<Func<T, bool>> predicate, CancellationToken ct) where T : class
-        => context.Set<T>().RemoveRange(await context.Set<T>().Where(predicate).ToListAsync(ct));
+    private async Task<bool> HasServiceAccountTableAsync(CancellationToken ct)
+    {
+        if (context is not DbContext db || db.Model.FindEntityType(typeof(SqlOSFgaServiceAccount)) is not { } entity) return false;
+        if (!db.Database.IsRelational()) return true;
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.Transaction = db.Database.CurrentTransaction?.GetDbTransaction();
+        command.CommandText = SqlOSDatabase.Resolve(db.Database).BuildTableExistsSql(entity.GetSchema(), entity.GetTableName()!);
+        return Convert.ToBoolean(await command.ExecuteScalarAsync(ct));
+    }
 
     private void Audit(string kind, string actor, string? user, string? organization, DateTime now) =>
         context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent { Id = Guid.NewGuid().ToString("N"), EventType = kind,

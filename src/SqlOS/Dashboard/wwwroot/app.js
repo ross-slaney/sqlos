@@ -2301,7 +2301,7 @@
         `;
 
         document.getElementById("delete-organization-identity")?.addEventListener("click", async () => {
-            if (!confirm("Permanently delete this organization identity? Host data cleanup runs first. This cannot be undone.")) return;
+            if (!confirm("Soft delete this organization? Access and sessions end. Its identity data remains stored. Host policy runs first.")) return;
             try { await fetchJson(`${authApiBasePath}/organizations/${organizationId}/delete`, { method: "POST", body: JSON.stringify({ confirm: true }) }); window.location.assign(pathForRoute("auth-organizations")); }
             catch (error) { setFlash("error", error.message); }
         });
@@ -3152,7 +3152,7 @@
                 setFlash("success", "Password reset email queued.");
             });
             document.getElementById("delete-user-identity")?.addEventListener("click", async () => {
-            if (!confirm("Permanently remove this account's credentials and personal sign-in identities? Shared history keeps an anonymous identifier. This cannot be undone.")) return;
+            if (!confirm("Soft delete this account? Access and sessions end. Its identity data, credentials and shared history remain stored.")) return;
             try { await fetchJson(`${authApiBasePath}/users/${userId}/delete`, { method: "POST", body: JSON.stringify({ confirm: true }) }); window.location.assign(pathForRoute("auth-users")); }
             catch (error) { setFlash("error", error.message); }
         });

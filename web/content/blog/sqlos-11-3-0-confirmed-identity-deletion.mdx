@@ -1,16 +1,16 @@
 ---
 title: "SqlOS 11.3.0: confirmed identity deletion"
-description: "Delete accounts and organizations with session revocation and transactional cleanup of host-owned data."
+description: "Delete accounts and organizations with session revocation and transactional host policy."
 date: "2026-11-02"
 author: "Ross Slaney"
 tags: ["AuthServer", "SqlOS", "Security", "Dashboard"]
 ---
 
-SqlOS 11.3.0 adds terminal account and organization deletion to the dashboard and a trusted-host API. Deletion requires explicit confirmation. It removes account credentials and sign-in identities, revokes sessions and memberships, and preserves an anonymous identifier for security audit and application history.
+SqlOS 11.3.0 adds soft account and organization deletion to the dashboard and a trusted-host API. Deletion requires explicit confirmation. It marks identities deleted and inactive, revokes sessions and deactivates memberships. Principal data, credentials and historical attribution remain stored.
 
 Deleting an organization also revokes its pending invitations, disables its SSO and SCIM connections, and closes its machine-client admission paths. Other organizations and their users remain unaffected.
 
-Applications register `ISqlOSIdentityDeletionParticipant` to enforce their own ownership or billing rules and remove product data inside the same database transaction. A rejected cleanup rolls back the deletion. Hosts authorize their callers before invoking the service; the service does not invent an application's administrator role.
+Applications register `ISqlOSIdentityDeletionParticipant` to enforce their own ownership or billing rules and apply product policy inside the same database transaction. A rejected participant rolls back the deletion. Hosts authorize their callers before invoking the service; the service does not invent an application's administrator role.
 
 ## Upgrade
 
@@ -19,6 +19,6 @@ dotnet add package SqlOS --version 11.3.0
 npm install @sqlos/headless@11.3.0
 ```
 
-The schema update adds nullable deletion timestamps. Existing identities remain active. Deletion is terminal: setting an active flag cannot restore a deleted identity. Historical audit records remain; this API is not a purge of every diagnostic or delivery record.
+The schema update adds nullable deletion timestamps. Existing identities remain active. Setting an active flag cannot restore a deleted identity. No restoration API is supplied. Identity data and historical audit remain stored; deletion does not purge records.
 
 Read [identity deletion](/docs/authserver/identity-deletion) for the host API, cleanup participants and retention boundaries.

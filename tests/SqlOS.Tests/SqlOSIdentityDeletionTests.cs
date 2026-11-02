@@ -19,7 +19,7 @@ public sealed class SqlOSIdentityDeletionTests
         await db.SaveChangesAsync();
     }
     [TestMethod]
-    public async Task AccountDeletion_RemovesSignInData_PreservesAnonymousIdentity_AndIsIdempotent()
+    public async Task AccountDeletion_PreservesPrincipalData_DisablesAdmission_AndIsIdempotent()
     {
         await using var db = Context(); await Seed(db);
         var service = new SqlOSIdentityDeletionService(db, []);
@@ -27,8 +27,9 @@ public sealed class SqlOSIdentityDeletionTests
         var result = await service.DeleteUserAsync("u", "u", true);
         result.AlreadyDeleted.Should().BeFalse();
         var user = await db.Set<SqlOSUser>().FindAsync("u");
-        user!.IsActive.Should().BeFalse(); user.DisplayName.Should().Be("Deleted account"); user.DefaultEmail.Should().BeNull(); user.DeletedAt.Should().NotBeNull();
-        db.Set<SqlOSCredential>().Should().BeEmpty(); db.Set<SqlOSUserEmail>().Should().BeEmpty(); db.Set<SqlOSMembership>().Should().BeEmpty();
+        user!.IsActive.Should().BeFalse(); user.DisplayName.Should().Be("Alice"); user.DefaultEmail.Should().Be("alice@example.com"); user.DeletedAt.Should().NotBeNull();
+        db.Set<SqlOSCredential>().Should().ContainSingle(); db.Set<SqlOSUserEmail>().Should().ContainSingle();
+        db.Set<SqlOSMembership>().Count().Should().Be(2); db.Set<SqlOSMembership>().Any(x => x.IsActive).Should().BeFalse();
         (await db.Set<SqlOSUser>().FindAsync("other"))!.IsActive.Should().BeTrue();
         (await service.DeleteUserAsync("u", "u", true)).AlreadyDeleted.Should().BeTrue();
         db.Set<SqlOSAuditEvent>().Count(x => x.EventType == "identity.user.deleted").Should().Be(1);
@@ -45,9 +46,10 @@ public sealed class SqlOSIdentityDeletionTests
         await service.RemoveMembershipAsync("o", "u", "u", true);
         await service.RemoveMembershipAsync("missing", "u", "u", true);
         await service.DeleteOrganizationAsync("o", "operator", true);
-        (await db.Set<SqlOSOrganization>().FindAsync("o"))!.Name.Should().Be("Deleted organization");
+        (await db.Set<SqlOSOrganization>().FindAsync("o"))!.Name.Should().Be("Acme");
+        (await db.Set<SqlOSOrganization>().FindAsync("o"))!.Slug.Should().Be("acme");
         (await db.Set<SqlOSOrganization>().FindAsync("other-org"))!.IsActive.Should().BeTrue();
-        db.Set<SqlOSMembership>().Should().ContainSingle();
+        db.Set<SqlOSMembership>().Count().Should().Be(2);
         (await service.DeleteOrganizationAsync("o", "operator", true)).AlreadyDeleted.Should().BeTrue();
         (await db.Set<SqlOSInvitation>().FindAsync("invite"))!.RevokedAt.Should().NotBeNull();
     }
