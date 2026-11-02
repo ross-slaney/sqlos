@@ -31,6 +31,16 @@ public sealed class IdentityDeletionIntegrationTests
             (await service.DeleteUserAsync("u", "u", true)).AlreadyDeleted.Should().BeTrue();
             db.Add(new SqlOSOrganization { Id = "org", Slug = "org", Name = "Example", CreatedAt = DateTime.UtcNow });
             await db.SaveChangesAsync();
+            db.Add(new SqlOSMembership { OrganizationId = "org", UserId = "u" });
+            await db.SaveChangesAsync();
+            await FluentActions.Invoking(() => service.RemoveMembershipAsync("org", "u", "u", true, prepare: async ct => {
+                db.Add(new SqlOSOrganization { Id = "handoff", Name = "Handoff", Slug = "handoff", CreatedAt = DateTime.UtcNow });
+                await db.SaveChangesAsync(ct);
+                throw new InvalidOperationException("Handoff refused.");
+            })).Should().ThrowAsync<InvalidOperationException>();
+            db.ChangeTracker.Clear();
+            (await db.Set<SqlOSMembership>().FindAsync("org", "u"))!.IsActive.Should().BeTrue();
+            (await db.Set<SqlOSOrganization>().AnyAsync(x => x.Id == "handoff")).Should().BeFalse();
             await service.DeleteOrganizationAsync("org", "u", true);
             db.ChangeTracker.Clear();
             (await db.Set<SqlOSOrganization>().SingleAsync(x => x.Id == "org")).DeletedAt.Should().NotBeNull();

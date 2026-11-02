@@ -80,12 +80,15 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
     }, cancellationToken);
 
     public Task RemoveMembershipAsync(string organizationId, string userId, string actorId, bool confirm,
-        CancellationToken cancellationToken = default) => RunAsync(async () =>
+        CancellationToken cancellationToken = default, Func<CancellationToken, Task>? prepare = null) => RunAsync(async () =>
     {
         RequireConfirmation(confirm, actorId);
         await SqlOSSsoPortalOrganizationLock.AcquireAsync(context, organizationId, cancellationToken);
         var membership = await context.Set<SqlOSMembership>().SingleOrDefaultAsync(x => x.OrganizationId == organizationId && x.UserId == userId, cancellationToken);
         if (membership is null || !membership.IsActive) return true;
+        // Host ownership handoff runs under this organization lock and the same transaction.
+        // Hosts may then acquire their own role lock without reversing the lock order.
+        if (prepare != null) await prepare(cancellationToken);
         await SqlOSAuthLifecyclePolicy.RevokeAsync(context, userId, organizationId, "membership_removed", DateTime.UtcNow,
             SqlOSAuthLifecycleRevocationScope.Offboarding, cancellationToken);
         membership.IsActive = false;
