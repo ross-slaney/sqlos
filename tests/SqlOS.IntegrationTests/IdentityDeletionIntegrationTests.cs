@@ -9,7 +9,7 @@ namespace SqlOS.IntegrationTests;
 public sealed class IdentityDeletionIntegrationTests
 {
     [TestMethod]
-    public async Task RealSqlSchemaAndHostCleanup_AreAtomic_AndTerminalDeletionSurvivesReload()
+    public async Task RealSqlSchemaAndHostCleanup_AreAtomic_AndSoftDeletionSurvivesReload()
     {
         await using var db = await AspireFixture.CreateIsolatedAuthContextAsync("IdentityDelete");
         try
@@ -26,8 +26,8 @@ public sealed class IdentityDeletionIntegrationTests
             await service.DeleteUserAsync("u", "u", true);
             db.ChangeTracker.Clear();
             var user = await db.Set<SqlOSUser>().SingleAsync();
-            user.DeletedAt.Should().NotBeNull(); user.IsActive.Should().BeFalse(); user.DefaultEmail.Should().BeNull();
-            db.Set<SqlOSUserEmail>().Should().BeEmpty();
+            user.DeletedAt.Should().NotBeNull(); user.IsActive.Should().BeFalse(); user.DefaultEmail.Should().Be("alice@example.test"); user.DisplayName.Should().Be("Alice");
+            db.Set<SqlOSUserEmail>().Should().ContainSingle();
             (await service.DeleteUserAsync("u", "u", true)).AlreadyDeleted.Should().BeTrue();
             db.Add(new SqlOSOrganization { Id = "org", Slug = "org", Name = "Example", CreatedAt = DateTime.UtcNow });
             await db.SaveChangesAsync();
