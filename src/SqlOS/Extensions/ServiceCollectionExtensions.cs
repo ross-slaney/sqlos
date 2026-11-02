@@ -123,6 +123,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<SqlOSClientResolutionService>();
         services.AddScoped<SqlOSAdminService>();
         services.AddScoped<SqlOSSessionRevocationService>();
+        services.AddScoped<SqlOSIdentityDeletionService>();
         services.AddScoped<SqlOSAuthService>();
         services.AddScoped<SqlOSIssuerSessionService>();
         services.AddScoped<SqlOSAuthorizationServerService>();

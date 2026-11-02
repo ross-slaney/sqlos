@@ -28,6 +28,18 @@ public static partial class EndpointRouteBuilderExtensions
 {
     private static void MapAdminIdentityEndpoints(RouteGroupBuilder api)
     {
+        api.MapPost("/users/{userId}/delete", async (string userId, JsonObject request, HttpContext context, SqlOSIdentityDeletionService deletion, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken ct) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { return Results.Ok(await deletion.DeleteUserAsync(userId, "operator", request["confirm"]?.GetValue<bool>() == true, ct)); }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException) { return Results.BadRequest(new { error = error.Message }); }
+        });
+        api.MapPost("/organizations/{organizationId}/delete", async (string organizationId, JsonObject request, HttpContext context, SqlOSIdentityDeletionService deletion, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken ct) =>
+        {
+            if (!await IsAdminAuthorizedAsync(context, options.Value, environment)) return Results.NotFound();
+            try { return Results.Ok(await deletion.DeleteOrganizationAsync(organizationId, "operator", request["confirm"]?.GetValue<bool>() == true, ct)); }
+            catch (Exception error) when (error is ArgumentException or InvalidOperationException) { return Results.BadRequest(new { error = error.Message }); }
+        });
         api.MapGet("/users", async (HttpContext context, string? search, string? cursor, int? pageSize, int? page, SqlOSAdminService adminService, IOptions<SqlOSAuthServerOptions> options, IHostEnvironment environment, CancellationToken cancellationToken) =>
         {
             if (!await IsAdminAuthorizedAsync(context, options.Value, environment))

@@ -2289,6 +2289,7 @@
                     <div>
                         <div class="page-eyebrow">Organization Detail</div>
                         <h2>${esc(organization.name)}</h2>
+                        <button type="button" id="delete-organization-identity">Delete organization identity</button>
                         <p>Manage the organization profile, memberships, and SAML SSO from one detail view.</p>
                     </div>
                     <a class="inline-link" href="${esc(pathForRoute("auth-organizations"))}">All organizations</a>
@@ -2299,6 +2300,11 @@
             ${tabContent}
         `;
 
+        document.getElementById("delete-organization-identity")?.addEventListener("click", async () => {
+            if (!confirm("Permanently delete this organization identity? Host data cleanup runs first. This cannot be undone.")) return;
+            try { await fetchJson(`${authApiBasePath}/organizations/${organizationId}/delete`, { method: "POST", body: JSON.stringify({ confirm: true }) }); window.location.assign(pathForRoute("auth-organizations")); }
+            catch (error) { setFlash("error", error.message); }
+        });
         if (tab === "general") {
             bindForm("update-org-form", async form => {
                 await fetchJson(`${authApiBasePath}/organizations/${organizationId}`, {
@@ -3034,6 +3040,7 @@
                             <button type="submit" ${user.defaultEmail ? "" : "disabled"}>Send password reset email</button>
                         </form>
                         <button type="button" id="revoke-user-sessions">Sign out all user sessions</button>
+                        <button type="button" id="delete-user-identity">Delete account identity</button>
                     </section>
                 </div>
             `;
@@ -3144,7 +3151,12 @@
                 });
                 setFlash("success", "Password reset email queued.");
             });
-            document.getElementById("revoke-user-sessions")?.addEventListener("click", async () => {
+            document.getElementById("delete-user-identity")?.addEventListener("click", async () => {
+            if (!confirm("Permanently remove this account's credentials and personal sign-in identities? Shared history keeps an anonymous identifier. This cannot be undone.")) return;
+            try { await fetchJson(`${authApiBasePath}/users/${userId}/delete`, { method: "POST", body: JSON.stringify({ confirm: true }) }); window.location.assign(pathForRoute("auth-users")); }
+            catch (error) { setFlash("error", error.message); }
+        });
+        document.getElementById("revoke-user-sessions")?.addEventListener("click", async () => {
                 try {
                     const reason = window.prompt("Why are you signing out this user?", "user_sessions_revoked");
                     if (reason === null) return;
