@@ -37,6 +37,8 @@ public sealed class SqlOSIdentityDeletionTests
     public async Task OrganizationDeletion_IsScoped_AndMembershipRemovalIsScoped()
     {
         await using var db = Context(); await Seed(db); var service = new SqlOSIdentityDeletionService(db, []);
+        db.Add(new SqlOSInvitation { Id = "invite", OrganizationId = "o", InvitedEmail = "new@example.test", CreatedAt = DateTime.UtcNow, ExpiresAt = DateTime.UtcNow.AddDays(1) });
+        await db.SaveChangesAsync();
         await service.RemoveMembershipAsync("o", "u", "u", true);
         (await db.Set<SqlOSMembership>().FindAsync("o", "u"))!.IsActive.Should().BeFalse();
         (await db.Set<SqlOSMembership>().FindAsync("other-org", "u"))!.IsActive.Should().BeTrue();
@@ -47,6 +49,7 @@ public sealed class SqlOSIdentityDeletionTests
         (await db.Set<SqlOSOrganization>().FindAsync("other-org"))!.IsActive.Should().BeTrue();
         db.Set<SqlOSMembership>().Should().ContainSingle();
         (await service.DeleteOrganizationAsync("o", "operator", true)).AlreadyDeleted.Should().BeTrue();
+        (await db.Set<SqlOSInvitation>().FindAsync("invite"))!.RevokedAt.Should().NotBeNull();
     }
     sealed class Veto : ISqlOSIdentityDeletionParticipant
     {

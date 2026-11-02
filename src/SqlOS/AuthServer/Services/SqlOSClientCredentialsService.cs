@@ -96,7 +96,9 @@ public sealed class SqlOSClientCredentialsService
         var account = await _context.Set<SqlOSFgaServiceAccount>()
             .Include(x => x.Subject)
             .SingleOrDefaultAsync(x => x.ClientId == client.ClientId, cancellationToken);
-        if (account?.ExpiresAt <= now)
+        var ownerDeleted = account?.Subject?.OrganizationId is { } ownerId && await _context.Set<SqlOSOrganization>()
+            .AnyAsync(x => x.Id == ownerId && x.DeletedAt != null, cancellationToken);
+        if (ownerDeleted || account?.ExpiresAt <= now)
         {
             await AuditAsync("oauth.client_credentials.failed", client.ClientId, account.SubjectId, httpContext, cancellationToken);
             throw new SqlOSClientCredentialsException("invalid_client", "Client authentication failed.", StatusCodes.Status401Unauthorized);

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
 using SqlOS.Database;
+using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -63,6 +64,16 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
         var now = DateTime.UtcNow;
         await SqlOSAuthLifecyclePolicy.RevokeAsync(context, null, organizationId, "organization_deleted", now,
             SqlOSAuthLifecycleRevocationScope.Offboarding, cancellationToken);
+        foreach (var invitation in await context.Set<SqlOSInvitation>().Where(x => x.OrganizationId == organizationId && x.AcceptedAt == null && x.RevokedAt == null).ToListAsync(cancellationToken))
+            invitation.RevokedAt = now;
+        if (context is DbContext modelContext && modelContext.Model.FindEntityType(typeof(SqlOSFgaServiceAccount)) != null)
+        {
+            var accounts = await context.Set<SqlOSFgaServiceAccount>().Where(x => x.Subject!.OrganizationId == organizationId).ToListAsync(cancellationToken);
+            var clientIds = accounts.Select(x => x.ClientId).ToList();
+            foreach (var account in accounts) { account.ExpiresAt = now; account.UpdatedAt = now; }
+            foreach (var client in await context.Set<SqlOSClientApplication>().Where(x => clientIds.Contains(x.ClientId)).ToListAsync(cancellationToken))
+            { client.IsActive = false; client.DisabledAt = now; client.DisabledReason = "organization_deleted"; }
+        }
         await RemoveAsync<SqlOSMembership>(x => x.OrganizationId == organizationId, cancellationToken);
         await RemoveAsync<SqlOSOrganizationDomain>(x => x.OrganizationId == organizationId, cancellationToken);
         foreach (var connection in await context.Set<SqlOSSsoConnection>().Where(x => x.OrganizationId == organizationId).ToListAsync(cancellationToken))
@@ -99,7 +110,7 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
 
     private void Audit(string kind, string actor, string? user, string? organization, DateTime now) =>
         context.Set<SqlOSAuditEvent>().Add(new SqlOSAuditEvent { Id = Guid.NewGuid().ToString("N"), EventType = kind,
-            ActorType = "user", ActorId = actor, UserId = user, OrganizationId = organization, OccurredAt = now });
+            ActorType = actor == "operator" ? "operator" : "user", ActorId = actor, UserId = user, OrganizationId = organization, OccurredAt = now });
 
     private static void RequireConfirmation(bool confirm, string actor)
     {
