@@ -679,6 +679,7 @@ public sealed partial class SqlOSAdminService
         var organization = await _context.Set<SqlOSOrganization>()
             .FirstOrDefaultAsync(x => x.Id == organizationId, cancellationToken)
             ?? throw new InvalidOperationException("Organization not found.");
+        if (organization.DeletedAt != null) throw new InvalidOperationException("A deleted organization cannot be changed or reactivated.");
         var isDeactivating = organization.IsActive && !request.IsActive;
         var isReactivating = !organization.IsActive && request.IsActive;
 
@@ -745,6 +746,9 @@ public sealed partial class SqlOSAdminService
 
     public async Task<SqlOSMembership> CreateMembershipAsync(string organizationId, SqlOSCreateMembershipRequest request, CancellationToken cancellationToken = default)
     {
+        if (!await _context.Set<SqlOSUser>().AnyAsync(x => x.Id == request.UserId && x.DeletedAt == null, cancellationToken)
+            || !await _context.Set<SqlOSOrganization>().AnyAsync(x => x.Id == organizationId && x.DeletedAt == null, cancellationToken))
+            throw new InvalidOperationException("Deleted identities cannot receive memberships.");
         var existing = await _context.Set<SqlOSMembership>().FirstOrDefaultAsync(
             x => x.OrganizationId == organizationId && x.UserId == request.UserId, cancellationToken);
         if (existing != null)
@@ -1174,6 +1178,7 @@ public sealed partial class SqlOSAdminService
                 x.Id,
                 x.DisplayName,
                 x.DefaultEmail,
+                x.DeletedAt,
                 x.IsActive,
                 x.CreatedAt,
                 x.UpdatedAt,

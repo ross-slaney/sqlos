@@ -31,7 +31,7 @@ internal static class SqlOSAuthLifecyclePolicy
         {
             var userIsActive = await context.Set<SqlOSUser>()
                 .AsNoTracking()
-                .AnyAsync(x => x.Id == userId && x.IsActive, cancellationToken);
+                .AnyAsync(x => x.Id == userId && x.IsActive && x.DeletedAt == null, cancellationToken);
             return userIsActive
                 ? SqlOSAuthLifecycleDecision.Active
                 : SqlOSAuthLifecycleDecision.Denied("user_inactive");
@@ -46,9 +46,9 @@ internal static class SqlOSAuthLifecyclePolicy
             .Where(x => x.Id == userId)
             .Select(user => new
             {
-                UserIsActive = user.IsActive,
+                UserIsActive = user.IsActive && user.DeletedAt == null,
                 OrganizationIsActive = context.Set<SqlOSOrganization>()
-                    .Any(organization => organization.Id == organizationId && organization.IsActive),
+                    .Any(organization => organization.Id == organizationId && organization.IsActive && organization.DeletedAt == null),
                 MembershipIsActive = context.Set<SqlOSMembership>()
                     .Any(membership => membership.UserId == userId
                         && membership.OrganizationId == organizationId
@@ -81,7 +81,7 @@ internal static class SqlOSAuthLifecyclePolicy
     {
         var organizationIsActive = await context.Set<SqlOSOrganization>()
             .AsNoTracking()
-            .AnyAsync(x => x.Id == organizationId && x.IsActive, cancellationToken);
+            .AnyAsync(x => x.Id == organizationId && x.IsActive && x.DeletedAt == null, cancellationToken);
         return organizationIsActive
             ? SqlOSAuthLifecycleDecision.Active
             : SqlOSAuthLifecycleDecision.Denied("organization_inactive");
