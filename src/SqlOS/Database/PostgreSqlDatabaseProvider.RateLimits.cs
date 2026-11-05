@@ -228,20 +228,10 @@ internal sealed partial class PostgreSqlDatabaseProvider
         var sql = new System.Text.StringBuilder();
         sql.AppendLine("WITH");
 
-        for (var index = 0; index < count; index++)
-        {
-            sql.AppendLine($"""
-                expired{index} AS (
-                  DELETE FROM {table}
-                  WHERE "Scope" = @scope{index}
-                    AND "BucketKey" = @key{index}
-                    AND ("LockedUntil" IS NULL OR "LockedUntil" <= @now)
-                    AND "WindowStartedAt" <= @windowStartedBefore{index}
-                  RETURNING 1
-                ),
-                """);
-        }
-
+        // An expired window is reset by the upsert below rather than deleted in a sibling CTE, and
+        // stale cleanup skips the buckets being reserved: every CTE reads the statement's snapshot,
+        // and when a DELETE and an ON CONFLICT UPDATE both target a row only one of them applies,
+        // so a stale count could carry over or a reservation could be lost.
         sql.AppendLine($"""
             stale AS (
               DELETE FROM {table}
@@ -251,6 +241,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                   WHERE "Scope" IN ({string.Join(", ", Enumerable.Range(0, count).Select(index => $"@scope{index}"))})
                     AND "UpdatedAt" < @staleBefore
                     AND ("LockedUntil" IS NULL OR "LockedUntil" <= @now)
+                    {string.Concat(Enumerable.Range(0, count).Select(index => $"AND NOT (\"Scope\" = @scope{index} AND \"BucketKey\" = @key{index}) "))}
                   ORDER BY "UpdatedAt"
                   LIMIT @cleanupBatchSize)
               RETURNING 1
@@ -264,6 +255,7 @@ internal sealed partial class PostgreSqlDatabaseProvider
                   SELECT t.*
                   FROM {table} t
                   WHERE t."Scope" = @scope{index} AND t."BucketKey" = @key{index}
+                    AND NOT (({ExpiredWindow("t", index)}))
                 ),
                 """);
         }
@@ -305,10 +297,13 @@ internal sealed partial class PostgreSqlDatabaseProvider
                          @now
                   WHERE NOT EXISTS (SELECT 1 FROM rejected)
                     AND NOT EXISTS (SELECT 1 FROM stale WHERE FALSE)
-                    AND NOT EXISTS (SELECT 1 FROM expired{index} WHERE FALSE)
                   ON CONFLICT ("Scope", "BucketKey") DO UPDATE
-                  SET "Count" = {table}."Count" + 1,
-                      "LockedUntil" = CASE WHEN {table}."Count" + 1 >= @threshold{index}
+                  SET "WindowStartedAt" = CASE WHEN {ExpiredWindow(table, index)}
+                          THEN @now ELSE {table}."WindowStartedAt" END,
+                      "Count" = CASE WHEN {ExpiredWindow(table, index)}
+                          THEN 1 ELSE {table}."Count" + 1 END,
+                      "LockedUntil" = CASE WHEN (CASE WHEN {ExpiredWindow(table, index)}
+                              THEN 1 ELSE {table}."Count" + 1 END) >= @threshold{index}
                           THEN @lockedUntil{index} ELSE NULL END,
                       "UpdatedAt" = @now
                   RETURNING "Count", "LockedUntil", "WindowStartedAt"
@@ -332,6 +327,9 @@ internal sealed partial class PostgreSqlDatabaseProvider
 
         return sql.ToString();
     }
+
+    private static string ExpiredWindow(string alias, int index)
+        => $"""({alias}."LockedUntil" IS NULL OR {alias}."LockedUntil" <= @now) AND {alias}."WindowStartedAt" <= @windowStartedBefore{index}""";
 
     public string BuildRateLimitReleaseManySql(string schema, int count)
     {

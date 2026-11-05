@@ -128,7 +128,7 @@ options.AuthServer.ConfigureEmailOtp(email =>
 });
 ```
 
-SqlOS checks the limits before creating or sending a challenge and records audit events for starts, send failures, successes, failures, and rate-limit rejections.
+SqlOS reserves the email, IP, and client buckets in one distributed rate-limit transaction before it creates or sends a challenge, so concurrent requests and replicas cannot exceed the lowest overlapping cap. A request inside the resend cooldown is rejected before it reserves anything. A delivery failure keeps the reserved slot; the hourly window expiry restores capacity. Each code allows `MaxAttempts` comparisons in total: SqlOS counts the attempt with a conditional update before comparing the code, so parallel guesses cannot exceed it. SqlOS records audit events for starts, send failures, successes, failures, and rate-limit rejections.
 
 ## Delivery address
 

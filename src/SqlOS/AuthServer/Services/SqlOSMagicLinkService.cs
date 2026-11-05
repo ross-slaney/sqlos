@@ -26,6 +26,7 @@ public sealed class SqlOSMagicLinkService
     private readonly ISqlOSAuthEmailSender _emailSender;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
     private readonly SqlOSAuthServerOptions _authOptions;
+    private readonly SqlOSDeliveryAdmissionService _deliveryAdmission;
     private readonly SqlOSMagicLinkOptions _options;
 
     public SqlOSMagicLinkService(
@@ -35,7 +36,8 @@ public sealed class SqlOSMagicLinkService
         SqlOSSettingsService settingsService,
         ISqlOSAuthEmailSender emailSender,
         IOptions<SqlOSAuthServerOptions> options,
-        ISqlOSTransactionalEmailService? transactionalEmailService = null)
+        ISqlOSTransactionalEmailService? transactionalEmailService = null,
+        SqlOSDeliveryAdmissionService? deliveryAdmissionService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -43,6 +45,7 @@ public sealed class SqlOSMagicLinkService
         _settingsService = settingsService;
         _emailSender = emailSender;
         _transactionalEmailService = transactionalEmailService;
+        _deliveryAdmission = deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService();
         _authOptions = options.Value;
         _options = options.Value.MagicLink;
     }
@@ -223,39 +226,26 @@ public sealed class SqlOSMagicLinkService
         var ipAddress = httpContext?.Connection.RemoteIpAddress?.ToString();
         var maskedEmail = MaskEmail(trimmedEmail);
 
+        // Only this address's links are loaded. The payload is plain JSON written by
+        // CreateTemporaryTokenAsync, so the serialized property narrows the read in SQL; the
+        // deserialized payload is still compared exactly below.
+        var payloadEmailFragment = $"\"{nameof(MagicLinkPayload.NormalizedEmail)}\":{JsonSerializer.Serialize(normalizedEmail)}";
         var recentTokens = await _context.Set<SqlOSTemporaryToken>()
-            .Where(x => x.Purpose == TokenPurpose && x.CreatedAt >= now.Subtract(_options.RateLimitWindow))
+            .Where(x => x.Purpose == TokenPurpose
+                && x.CreatedAt >= now.Subtract(_options.RateLimitWindow)
+                && x.PayloadJson != null
+                && x.PayloadJson.Contains(payloadEmailFragment))
             .ToListAsync(cancellationToken);
         var recent = recentTokens
             .Select(token => new RecentMagicLinkToken(token, _cryptoService.DeserializePayload<MagicLinkPayload>(token)))
-            .Where(x => x.Payload != null)
+            .Where(x => x.Payload != null
+                && string.Equals(x.Payload.NormalizedEmail, normalizedEmail, StringComparison.Ordinal))
             .ToArray();
-
-        if (recent.Count(x => string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)) >= _options.MaxLinksPerEmailPerWindow)
-        {
-            await RecordMagicLinkRateLimitAsync("email", maskedEmail, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-            throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(ipAddress)
-            && recent.Count(x => string.Equals(x.Payload!.IpAddress, ipAddress, StringComparison.Ordinal)) >= _options.MaxLinksPerIpPerWindow)
-        {
-            await RecordMagicLinkRateLimitAsync("ip", maskedEmail, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-            throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(clientApplicationId)
-            && recent.Count(x => string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)) >= _options.MaxLinksPerClientPerWindow)
-        {
-            await RecordMagicLinkRateLimitAsync("client", maskedEmail, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
-            throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
-        }
 
         var latestContextToken = recent
             .Where(x => x.Token.ConsumedAt == null
                 && x.Token.ExpiresAt > now
-                && string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)
-                && string.Equals(x.Payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal)
+                && string.Equals(x.Payload!.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal)
                 && string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)
                 && string.Equals(x.Payload.RequestedOrganizationId, requestedOrganizationId, StringComparison.Ordinal))
             .OrderByDescending(x => x.Token.CreatedAt)
@@ -265,10 +255,24 @@ public sealed class SqlOSMagicLinkService
             throw new InvalidOperationException($"Wait {(int)Math.Ceiling(_options.ResendCooldown.TotalSeconds)} seconds before requesting another sign-in link.");
         }
 
+        // The reservation is the only admission: concurrent starts that all passed the cooldown
+        // read cannot create more links than the email, IP, and client caps allow.
+        var admission = await _deliveryAdmission.ReserveMagicLinkAsync(
+            normalizedEmail,
+            ipAddress,
+            clientApplicationId,
+            _options,
+            now,
+            cancellationToken);
+        if (!admission.Admitted)
+        {
+            await RecordMagicLinkRateLimitAsync(admission.RejectedScope ?? "email", maskedEmail, ipAddress, clientApplicationId, requestedOrganizationId, cancellationToken);
+            throw new InvalidOperationException("Too many sign-in link requests. Try again later.");
+        }
+
         foreach (var activeToken in recent.Where(x => x.Token.ConsumedAt == null
             && x.Token.ExpiresAt > now
-            && string.Equals(x.Payload!.NormalizedEmail, normalizedEmail, StringComparison.Ordinal)
-            && string.Equals(x.Payload.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal)
+            && string.Equals(x.Payload!.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal)
             && string.Equals(x.Token.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)
             && string.Equals(x.Payload.RequestedOrganizationId, requestedOrganizationId, StringComparison.Ordinal)))
         {

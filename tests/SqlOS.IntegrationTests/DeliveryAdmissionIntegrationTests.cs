@@ -245,6 +245,219 @@ public sealed class DeliveryAdmissionIntegrationTests
             .Should().BeGreaterThan(10);
     }
 
+    [TestMethod]
+    public async Task EmailOtp_ConcurrentStarts_AdmitAtMostTheEmailIpAndClientCaps()
+    {
+        await using var database = await DeliveryAdmissionDatabase.CreateEmailDeliveryAsync(options =>
+        {
+            options.EmailOtp.ResendCooldown = TimeSpan.Zero;
+            options.EmailOtp.MaxChallengesPerHour = 5;
+            options.EmailOtp.MaxChallengesPerIpPerHour = 7;
+            options.EmailOtp.MaxChallengesPerClientPerHour = 15;
+        });
+        var sender = new ConcurrentAuthEmailSender();
+
+        await AssertConcurrentEmailStartsAsync(
+            database,
+            sender,
+            (actor, email, ip) => StartEmailOtpAsync(actor, email, ip),
+            limitedAudit: "email_otp.rate_limit_rejected",
+            countPersisted: static (context, emails) => context.Set<SqlOSEmailOtpChallenge>()
+                .CountAsync(x => emails.Contains(x.NormalizedEmail)));
+
+        // The resend cooldown still applies sequentially, rejects without spending capacity, and
+        // a resend after it succeeds.
+        database.AuthOptions.EmailOtp.ResendCooldown = TimeSpan.FromMinutes(5);
+        await ExpireRateLimitBucketsAsync(database);
+        var resend = await database.CreateUserAsync("otp-resend");
+        var normalizedResend = SqlOSAdminService.NormalizeEmail(resend);
+        await using (var actor = database.CreateEmailDeliveryActor(sender))
+        {
+            (await StartEmailOtpAsync(actor, resend, "198.51.100.200")).Should().Be("sent");
+            (await StartEmailOtpAsync(actor, resend, "198.51.100.200")).Should().Be("cooldown");
+        }
+
+        await database.Context.Set<SqlOSEmailOtpChallenge>()
+            .Where(x => x.NormalizedEmail == normalizedResend)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(x => x.LastSentAt, x => x.LastSentAt.AddMinutes(-10))
+                .SetProperty(x => x.CreatedAt, x => x.CreatedAt.AddMinutes(-10)));
+        await using (var actor = database.CreateEmailDeliveryActor(sender))
+        {
+            (await StartEmailOtpAsync(actor, resend, "198.51.100.200")).Should().Be("sent");
+        }
+
+        database.Context.ChangeTracker.Clear();
+        var resent = await database.Context.Set<SqlOSEmailOtpChallenge>()
+            .Where(x => x.NormalizedEmail == normalizedResend)
+            .OrderBy(x => x.CreatedAt)
+            .ToListAsync();
+        resent.Should().HaveCount(2, "the cooldown rejection creates no challenge");
+        resent[0].InvalidatedReason.Should().Be("superseded");
+        resent[1].InvalidatedAt.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task MagicLink_ConcurrentStarts_AdmitAtMostTheEmailIpAndClientCaps()
+    {
+        await using var database = await DeliveryAdmissionDatabase.CreateEmailDeliveryAsync(options =>
+        {
+            options.MagicLink.ResendCooldown = TimeSpan.Zero;
+            options.MagicLink.MaxLinksPerEmailPerWindow = 5;
+            options.MagicLink.MaxLinksPerIpPerWindow = 7;
+            options.MagicLink.MaxLinksPerClientPerWindow = 15;
+        });
+        var sender = new ConcurrentAuthEmailSender();
+
+        await AssertConcurrentEmailStartsAsync(
+            database,
+            sender,
+            (actor, email, ip) => StartMagicLinkAsync(actor, email, ip),
+            limitedAudit: "magic_link.rate_limit_rejected",
+            countPersisted: static async (context, emails) =>
+            {
+                var tokens = await context.Set<SqlOSTemporaryToken>()
+                    .Where(x => x.Purpose == SqlOSMagicLinkService.TokenPurpose)
+                    .Select(x => x.PayloadJson!)
+                    .ToListAsync();
+                return tokens.Count(json => emails.Contains(
+                    System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("NormalizedEmail").GetString()!));
+            });
+
+        database.AuthOptions.MagicLink.ResendCooldown = TimeSpan.FromMinutes(5);
+        await ExpireRateLimitBucketsAsync(database);
+        var resend = await database.CreateUserAsync("link-resend");
+        await using (var actor = database.CreateEmailDeliveryActor(sender))
+        {
+            (await StartMagicLinkAsync(actor, resend, "198.51.100.200")).Should().Be("sent");
+            (await StartMagicLinkAsync(actor, resend, "198.51.100.200")).Should().Be("cooldown");
+        }
+
+        await database.Context.Set<SqlOSTemporaryToken>()
+            .Where(x => x.Purpose == SqlOSMagicLinkService.TokenPurpose && x.ConsumedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.CreatedAt, x => x.CreatedAt.AddMinutes(-10)));
+        await using (var actor = database.CreateEmailDeliveryActor(sender))
+        {
+            (await StartMagicLinkAsync(actor, resend, "198.51.100.200")).Should().Be("sent");
+        }
+
+        database.Context.ChangeTracker.Clear();
+        var links = (await database.Context.Set<SqlOSTemporaryToken>()
+                .Where(x => x.Purpose == SqlOSMagicLinkService.TokenPurpose)
+                .OrderBy(x => x.CreatedAt)
+                .ToListAsync())
+            .Where(x => x.PayloadJson!.Contains(resend, StringComparison.Ordinal))
+            .ToList();
+        links.Should().HaveCount(2, "the cooldown rejection creates no link");
+        links[0].ConsumedAt.Should().NotBeNull("the resend supersedes the earlier link");
+        links[1].ConsumedAt.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Fires three bursts of 50 concurrent starts against one database with email cap 5, IP cap 7,
+    /// and client cap 15: one address from 50 IPs (email cap), 50 addresses from one IP (IP cap),
+    /// then 50 addresses from 50 IPs (the 3 client slots left). Every address has an account, so
+    /// each admitted start sends exactly one email, and every limited start writes one audit event.
+    /// </summary>
+    private static async Task AssertConcurrentEmailStartsAsync(
+        DeliveryAdmissionDatabase database,
+        ConcurrentAuthEmailSender sender,
+        Func<EmailDeliveryActor, string, string, Task<string>> start,
+        string limitedAudit,
+        Func<TestSqlOSDbContext, IReadOnlyCollection<string>, Task<int>> countPersisted)
+    {
+        const int burst = 50;
+        var single = await database.CreateUserAsync("burst-email");
+        var sameIp = new List<string>();
+        var spread = new List<string>();
+        for (var index = 0; index < burst; index++)
+        {
+            sameIp.Add(await database.CreateUserAsync($"burst-ip-{index}"));
+            spread.Add(await database.CreateUserAsync($"burst-client-{index}"));
+        }
+
+        var byEmail = await RunBurstAsync(database, sender, start,
+            Enumerable.Range(0, burst).Select(index => (single, $"10.1.0.{index + 1}")));
+        byEmail.Count(x => x == "sent").Should().Be(5, "the per-email cap admits 5 of 50 concurrent starts");
+        // A start can also see a sibling that committed after its own clock read and hit the
+        // zero cooldown; either way it is not admitted.
+        byEmail.Should().OnlyContain(x => x == "sent" || x == "limited" || x == "cooldown");
+        sender.Messages.Should().HaveCount(5);
+
+        var byIp = await RunBurstAsync(database, sender, start,
+            sameIp.Select(email => (email, "10.2.0.1")));
+        byIp.Count(x => x == "sent").Should().Be(7, "the per-IP cap admits 7 of 50 concurrent starts");
+        byIp.Count(x => x == "limited").Should().Be(burst - 7);
+        sender.Messages.Should().HaveCount(12);
+
+        var byClient = await RunBurstAsync(database, sender, start,
+            spread.Select((email, index) => (email, $"10.3.0.{index + 1}")));
+        byClient.Count(x => x == "sent").Should().Be(3, "the client cap of 15 has 3 starts left");
+        byClient.Count(x => x == "limited").Should().Be(burst - 3);
+        sender.Messages.Should().HaveCount(15);
+
+        database.Context.ChangeTracker.Clear();
+        var all = sameIp.Concat(spread).Append(single).Select(SqlOSAdminService.NormalizeEmail).ToHashSet(StringComparer.Ordinal);
+        (await countPersisted(database.Context, all)).Should().Be(15, "a rejected start persists nothing");
+        (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == limitedAudit))
+            .Should().Be(byEmail.Concat(byIp).Concat(byClient).Count(x => x == "limited"));
+    }
+
+    private static async Task<string[]> RunBurstAsync(
+        DeliveryAdmissionDatabase database,
+        ConcurrentAuthEmailSender sender,
+        Func<EmailDeliveryActor, string, string, Task<string>> start,
+        IEnumerable<(string Email, string Ip)> requests)
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tasks = requests.Select(async request =>
+        {
+            await using var actor = database.CreateEmailDeliveryActor(sender);
+            await gate.Task;
+            return await start(actor, request.Email, request.Ip);
+        }).ToArray();
+        gate.SetResult();
+        return await Task.WhenAll(tasks);
+    }
+
+    private static async Task<string> StartEmailOtpAsync(EmailDeliveryActor actor, string email, string ip)
+    {
+        try
+        {
+            await actor.EmailOtp.StartForClientAsync(
+                new SqlOSEmailOtpStartRequest(email, "test-client", null),
+                CreateHttpContext(ip));
+            return "sent";
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "Too many sign-in code requests. Try again later.")
+        {
+            return "limited";
+        }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("Wait ", StringComparison.Ordinal))
+        {
+            return "cooldown";
+        }
+    }
+
+    private static async Task<string> StartMagicLinkAsync(EmailDeliveryActor actor, string email, string ip)
+    {
+        try
+        {
+            await actor.MagicLink.StartForClientAsync(
+                new SqlOSMagicLinkStartRequest(email, "test-client", null),
+                CreateHttpContext(ip));
+            return "sent";
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "Too many sign-in link requests. Try again later.")
+        {
+            return "limited";
+        }
+        catch (InvalidOperationException ex) when (ex.Message.StartsWith("Wait ", StringComparison.Ordinal))
+        {
+            return "cooldown";
+        }
+    }
+
     private static async Task<string> StartPhoneAsync(PhoneOtpActor actor, string phone, string ip)
     {
         try
@@ -299,6 +512,54 @@ public sealed class DeliveryAdmissionIntegrationTests
 
         public TestSqlOSDbContext Context { get; }
         public SqlOSAdminService Admin { get; }
+        public SqlOSAuthServerOptions AuthOptions => _options;
+
+        public static Task<DeliveryAdmissionDatabase> CreateEmailDeliveryAsync(
+            Action<SqlOSAuthServerOptions> configure)
+            => CreateAsync(options =>
+            {
+                options.SeedAuthPage(page =>
+                {
+                    page.EnabledCredentialTypes = ["password", "email_otp", "magic_link"];
+                    page.EnablePasswordSignup = true;
+                });
+                options.EmailOtp.BuildMessage = context => new SqlOSAuthEmailMessage(
+                    context.Email,
+                    "Your sign-in code",
+                    $"<p>{context.Code}</p>",
+                    context.Code);
+                options.MagicLink.BuildMessage = context => new SqlOSAuthEmailMessage(
+                    context.Email,
+                    "Your sign-in link",
+                    $"<p>{context.LoginUrl}</p>",
+                    context.LoginUrl);
+                configure(options);
+            }, "DeliveryEmail");
+
+        /// <summary>Creates a passwordless account and returns its address.</summary>
+        public async Task<string> CreateUserAsync(string label)
+        {
+            var email = $"{label}-{Guid.NewGuid():N}@example.com";
+            await Admin.CreateUserAsync(new SqlOSCreateUserRequest(label, email, Password: null));
+            return email;
+        }
+
+        public EmailDeliveryActor CreateEmailDeliveryActor(ConcurrentAuthEmailSender sender)
+        {
+            var context = new TestSqlOSDbContext(
+                new DbContextOptionsBuilder<TestSqlOSDbContext>()
+                    .UseTestProvider(_connectionString)
+                    .Options);
+            var options = Options.Create(_options);
+            var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+            var admin = new SqlOSAdminService(context, options, crypto);
+            var settings = new SqlOSSettingsService(context, options, sender);
+            var admission = new SqlOSDeliveryAdmissionService(new SqlOSDistributedRateLimitStore(context, options));
+            return new EmailDeliveryActor(
+                context,
+                new SqlOSEmailOtpService(context, admin, crypto, settings, sender, options, deliveryAdmissionService: admission),
+                new SqlOSMagicLinkService(context, admin, crypto, settings, sender, options, deliveryAdmissionService: admission));
+        }
 
         public static Task<DeliveryAdmissionDatabase> CreatePasswordResetAsync(
             Action<SqlOSAuthServerOptions> configure)
@@ -464,6 +725,17 @@ public sealed class DeliveryAdmissionIntegrationTests
                 await context.DisposeAsync();
             }
         }
+    }
+
+    private sealed class EmailDeliveryActor(
+        TestSqlOSDbContext context,
+        SqlOSEmailOtpService emailOtp,
+        SqlOSMagicLinkService magicLink) : IAsyncDisposable
+    {
+        public SqlOSEmailOtpService EmailOtp { get; } = emailOtp;
+        public SqlOSMagicLinkService MagicLink { get; } = magicLink;
+
+        public ValueTask DisposeAsync() => context.DisposeAsync();
     }
 
     private sealed class PhoneOtpActor(

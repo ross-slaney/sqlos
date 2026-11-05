@@ -26,6 +26,7 @@ public sealed class SqlOSEmailOtpService
     private readonly SqlOSSettingsService _settingsService;
     private readonly ISqlOSAuthEmailSender _emailSender;
     private readonly ISqlOSTransactionalEmailService? _transactionalEmailService;
+    private readonly SqlOSDeliveryAdmissionService _deliveryAdmission;
     private readonly SqlOSEmailOtpOptions _options;
 
     public SqlOSEmailOtpService(
@@ -35,7 +36,8 @@ public sealed class SqlOSEmailOtpService
         SqlOSSettingsService settingsService,
         ISqlOSAuthEmailSender emailSender,
         IOptions<SqlOSAuthServerOptions> options,
-        ISqlOSTransactionalEmailService? transactionalEmailService = null)
+        ISqlOSTransactionalEmailService? transactionalEmailService = null,
+        SqlOSDeliveryAdmissionService? deliveryAdmissionService = null)
     {
         _context = context;
         _adminService = adminService;
@@ -43,6 +45,7 @@ public sealed class SqlOSEmailOtpService
         _settingsService = settingsService;
         _emailSender = emailSender;
         _transactionalEmailService = transactionalEmailService;
+        _deliveryAdmission = deliveryAdmissionService ?? new SqlOSDeliveryAdmissionService();
         _options = options.Value.EmailOtp;
     }
 
@@ -638,52 +641,6 @@ public sealed class SqlOSEmailOtpService
             .Where(x => string.Equals(x.NormalizedEmail, normalizedEmail, StringComparison.Ordinal))
             .ToList();
 
-        if (recentChallenges.Count >= _options.MaxChallengesPerHour)
-        {
-            await RecordOtpAuditAsync(
-                "email_otp.rate_limit_rejected",
-                maskedEmail: MaskEmail(trimmedEmail),
-                purpose,
-                ipAddress,
-                new { limit = "email", clientApplicationId, requestedOrganizationId },
-                cancellationToken);
-            throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(ipAddress))
-        {
-            var recentIpChallengeCount = await _context.Set<SqlOSEmailOtpChallenge>()
-                .CountAsync(x => x.IpAddress == ipAddress && x.CreatedAt >= now.AddHours(-1), cancellationToken);
-            if (recentIpChallengeCount >= _options.MaxChallengesPerIpPerHour)
-            {
-                await RecordOtpAuditAsync(
-                    "email_otp.rate_limit_rejected",
-                    maskedEmail: MaskEmail(trimmedEmail),
-                    purpose,
-                    ipAddress,
-                    new { limit = "ip", clientApplicationId, requestedOrganizationId },
-                    cancellationToken);
-                throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(clientApplicationId))
-        {
-            var recentClientChallengeCount = await _context.Set<SqlOSEmailOtpChallenge>()
-                .CountAsync(x => x.ClientApplicationId == clientApplicationId && x.CreatedAt >= now.AddHours(-1), cancellationToken);
-            if (recentClientChallengeCount >= _options.MaxChallengesPerClientPerHour)
-            {
-                await RecordOtpAuditAsync(
-                    "email_otp.rate_limit_rejected",
-                    maskedEmail: MaskEmail(trimmedEmail),
-                    purpose,
-                    ipAddress,
-                    new { limit = "client", clientApplicationId, requestedOrganizationId },
-                    cancellationToken);
-                throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
-            }
-        }
-
         var latestContextChallenge = recentChallenges
             .FirstOrDefault(x => string.Equals(x.AuthorizationRequestId, authorizationRequestId, StringComparison.Ordinal)
                 && string.Equals(x.ClientApplicationId, clientApplicationId, StringComparison.Ordinal)
@@ -693,6 +650,27 @@ public sealed class SqlOSEmailOtpService
         if (latestContextChallenge != null && latestContextChallenge.LastSentAt > now.Subtract(_options.ResendCooldown))
         {
             throw new InvalidOperationException($"Wait {(int)Math.Ceiling(_options.ResendCooldown.TotalSeconds)} seconds before requesting another code.");
+        }
+
+        // The reservation is the only admission: concurrent starts that all passed the cooldown
+        // read cannot create more challenges than the email, IP, and client caps allow.
+        var admission = await _deliveryAdmission.ReserveEmailOtpAsync(
+            normalizedEmail,
+            ipAddress,
+            clientApplicationId,
+            _options,
+            now,
+            cancellationToken);
+        if (!admission.Admitted)
+        {
+            await RecordOtpAuditAsync(
+                "email_otp.rate_limit_rejected",
+                maskedEmail: MaskEmail(trimmedEmail),
+                purpose,
+                ipAddress,
+                new { limit = admission.RejectedScope ?? "email", clientApplicationId, requestedOrganizationId },
+                cancellationToken);
+            throw new InvalidOperationException("Too many sign-in code requests. Try again later.");
         }
 
         var emailRecord = await _context.Set<SqlOSUserEmail>()
