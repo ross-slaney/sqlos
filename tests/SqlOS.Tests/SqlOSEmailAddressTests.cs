@@ -179,4 +179,39 @@ public sealed class SqlOSEmailAddressTests
         SqlOSAdminService.NormalizeEmail("boſ@example.com").Should().Be("BOſ@EXAMPLE.COM");
         SqlOSEmailAddress.IsSameMailbox("bob", "bob").Should().BeFalse();
     }
+    [DataTestMethod]
+    [DataRow("first.last+tag@sub.example.co.uk")]
+    [DataRow("o'brien@example.com")]
+    [DataRow("Mixed.Case@Example.COM")]
+    [DataRow("  padded@example.com  ")]
+    [DataRow("ü@münchen.de")]
+    [DataRow("üser@example.com")]
+    [DataRow("user@xn--mnchen-3ya.de")]
+    public void SubmittedAddresses_AcceptOrdinaryMailboxes(string input)
+    {
+        SqlOSEmailAddress.TryCanonicalizeSubmitted(input, out var address, out var key).Should().BeTrue();
+        SqlOSEmailAddress.TryCanonicalize(input, out var expectedAddress, out var expectedKey).Should().BeTrue();
+        address.Should().Be(expectedAddress);
+        key.Should().Be(expectedKey);
+    }
+
+    [DataTestMethod]
+    [DataRow("x<meta http-equiv=refresh content='0;url=https://evil.example'>@a.b")]
+    [DataRow("<b>x</b>@example.com")]
+    [DataRow("\"quoted\"@example.com")]
+    [DataRow("Jane <jane@example.com>")]
+    [DataRow("jane(comment)@example.com")]
+    [DataRow("a,b@example.com")]
+    [DataRow("a;b@example.com")]
+    [DataRow("a\\b@example.com")]
+    [DataRow("a@b@example.com")]
+    [DataRow("jane doe@example.com")]
+    [DataRow("@example.com")]
+    [DataRow("jane@")]
+    public void SubmittedAddresses_RejectMarkupDisplayNamesAndSpecials(string input)
+    {
+        SqlOSEmailAddress.TryCanonicalizeSubmitted(input, out var address, out var key).Should().BeFalse();
+        address.Should().BeEmpty();
+        key.Should().BeEmpty();
+    }
 }

@@ -44,6 +44,11 @@ internal static class SqlOSSignupOrchestration
             "Email address is required.",
             EmailMaxLength,
             EmailTooLongMessage);
+        if (!SqlOSEmailAddress.TryCanonicalizeSubmitted(trimmedEmail, out _, out _))
+        {
+            throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
+        }
+
         if (requirePassword && string.IsNullOrWhiteSpace(password))
         {
             throw new InvalidOperationException(PasswordRequiredMessage);

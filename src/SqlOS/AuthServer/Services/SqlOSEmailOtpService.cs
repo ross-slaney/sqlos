@@ -90,7 +90,7 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("Display name is required.");
         }
 
-        var trimmedEmail = RequireValidEmail(email);
+        var trimmedEmail = RequireValidEmail(email, submittedForSignup: true);
         var existingEmail = await _context.Set<SqlOSUserEmail>()
             .AsNoTracking()
             .FindByEmailAsync(trimmedEmail, cancellationToken);
@@ -170,7 +170,7 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("Display name is required.");
         }
 
-        var trimmedEmail = RequireValidEmail(request.Email);
+        var trimmedEmail = RequireValidEmail(request.Email, submittedForSignup: true);
         var existingEmail = await _context.Set<SqlOSUserEmail>()
             .AsNoTracking()
             .FindByEmailAsync(trimmedEmail, cancellationToken);
@@ -800,7 +800,7 @@ public sealed class SqlOSEmailOtpService
             challenge.LastSentAt.Add(_options.ResendCooldown));
     }
 
-    private static string RequireValidEmail(string? email)
+    private static string RequireValidEmail(string? email, bool submittedForSignup = false)
     {
         var trimmedEmail = email?.Trim();
         if (string.IsNullOrWhiteSpace(trimmedEmail))
@@ -808,7 +808,10 @@ public sealed class SqlOSEmailOtpService
             throw new InvalidOperationException("Email address is required.");
         }
 
-        if (!SqlOSEmailAddress.TryCanonicalize(trimmedEmail, out var address, out _))
+        var valid = submittedForSignup
+            ? SqlOSEmailAddress.TryCanonicalizeSubmitted(trimmedEmail, out var address, out _)
+            : SqlOSEmailAddress.TryCanonicalize(trimmedEmail, out address, out _);
+        if (!valid)
         {
             throw new InvalidOperationException(SqlOSEmailAddress.InvalidEmailMessage);
         }
