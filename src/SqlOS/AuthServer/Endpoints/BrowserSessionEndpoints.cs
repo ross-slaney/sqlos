@@ -64,6 +64,7 @@ public static partial class EndpointRouteBuilderExtensions
             var redirectTarget = await authorizationServerService.ResolvePostLogoutRedirectAsync(
                 context,
                 requestedReturnUrl,
+                context.Request.Query["client_id"].ToString(),
                 cancellationToken);
 
             return redirectTarget == null

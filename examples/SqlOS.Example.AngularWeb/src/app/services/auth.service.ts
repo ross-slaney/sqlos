@@ -104,6 +104,7 @@ export class AuthService {
 
     const logoutUrl = new URL('/sqlos/auth/logout', environment.apiUrl);
     logoutUrl.searchParams.set('returnTo', new URL(returnPath, window.location.origin).toString());
+    logoutUrl.searchParams.set('client_id', environment.clientId);
     window.location.assign(logoutUrl.toString());
   }
 

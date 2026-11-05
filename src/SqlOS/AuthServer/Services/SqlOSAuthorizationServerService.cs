@@ -2316,7 +2316,25 @@ public sealed class SqlOSAuthorizationServerService
     public async Task<SqlOSAuthPageSettingsDto> GetAuthPageSettingsAsync(CancellationToken cancellationToken = default)
         => await _settingsService.GetAuthPageSettingsAsync(cancellationToken);
 
-    public async Task<string?> ResolvePostLogoutRedirectAsync(HttpContext httpContext, string? requestedUrl, CancellationToken cancellationToken = default)
+    // Only clients an operator registered (code seeds, admin API, dashboard) widen the
+    // external post-logout allowlist. DCR and CIMD rows are attacker-creatable on an
+    // unauthenticated endpoint, so their origins would make /logout an open redirect.
+    private static readonly string[] OperatorRegistrationSources = ["seeded", "manual", "admin"];
+
+    public Task<string?> ResolvePostLogoutRedirectAsync(HttpContext httpContext, string? requestedUrl, CancellationToken cancellationToken = default)
+        => ResolvePostLogoutRedirectAsync(httpContext, requestedUrl, clientId: null, cancellationToken);
+
+    /// <summary>
+    /// Resolves a post-logout destination. Local paths and the public origin are always
+    /// allowed. External origins must come from an active, operator-registered client;
+    /// when <paramref name="clientId"/> is supplied, only that client's origins apply, and
+    /// an unknown, inactive, or dynamically registered client allows no external origin.
+    /// </summary>
+    public async Task<string?> ResolvePostLogoutRedirectAsync(
+        HttpContext httpContext,
+        string? requestedUrl,
+        string? clientId,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(requestedUrl))
         {
@@ -2344,8 +2362,18 @@ public sealed class SqlOSAuthorizationServerService
             GetPublicOrigin(httpContext)
         };
 
-        var configuredClientRedirectUris = await _context.Set<SqlOSClientApplication>()
+        var clients = _context.Set<SqlOSClientApplication>()
             .AsNoTracking()
+            .Where(x => x.IsActive
+                && x.DisabledAt == null
+                && OperatorRegistrationSources.Contains(x.RegistrationSource));
+        if (!string.IsNullOrWhiteSpace(clientId))
+        {
+            var normalizedClientId = clientId.Trim();
+            clients = clients.Where(x => x.ClientId == normalizedClientId);
+        }
+
+        var configuredClientRedirectUris = await clients
             .Select(x => x.RedirectUrisJson)
             .ToListAsync(cancellationToken);
 

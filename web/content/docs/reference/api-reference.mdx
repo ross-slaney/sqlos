@@ -235,7 +235,7 @@ Every hosted `POST` requires the short-lived antiforgery field and matching brow
 | `GET` / `POST` | `/sqlos/auth/password/reset` and `/password/reset/submit` | Hosted password-reset form |
 | `GET` | `/sqlos/auth/invitations/accept?token=...` | Open an email invitation |
 | `GET` / `POST` | `/sqlos/auth/device` and child routes | Resolve, approve, or deny a device request |
-| `GET` | `/sqlos/auth/logout` | End the reusable issuer session cookie and redirect safely. This is the browser Sign out. Clearing app tokens alone is not enough. |
+| `GET` | `/sqlos/auth/logout` | End the reusable issuer session cookie and redirect safely. This is the browser Sign out. Clearing app tokens alone is not enough. Takes `returnTo` and an optional `client_id` that scopes external destinations; see [Refresh and logout](/docs/authserver/refresh-and-logout#logout). |
 | `GET` | `/sqlos/auth/logged-out` | Hosted post-logout page |
 
 Integrate through `/authorize`, `/token`, and the documented AuthPage configuration unless you are intentionally building a headless UI. `POST /sqlos/auth/signup` and `POST /sqlos/auth/logout` are JSON helpers described next; they are not hosted form handlers.
