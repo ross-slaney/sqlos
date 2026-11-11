@@ -1,4 +1,6 @@
 using Azure;
+using Azure.Communication.Email;
+using Azure.Core.Pipeline;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -89,6 +91,7 @@ public sealed class SqlOSTransactionalEmailTests
         result.Status.Should().Be(SqlOSEmailDeliveryStatuses.Queued);
         result.ProviderMessageId.Should().Be("provider-1");
         sender.Messages.Should().ContainSingle();
+        sender.Messages[0].Headers.Should().BeNull();
 
         var delivery = await context.Set<SqlOSEmailDelivery>().SingleAsync();
         delivery.TemplateKey.Should().Be("order-shipped");
@@ -234,11 +237,17 @@ public sealed class SqlOSTransactionalEmailTests
 
         sender.IsConfigured.Should().BeTrue();
 
+        var headers = new Dictionary<string, string>
+        {
+            ["List-Unsubscribe"] = "<https://app.example.test/unsubscribe/one-click?token=legacy>",
+            ["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        };
         var result = await sender.SendAsync(new SqlOSEmailMessage(
             "user@example.com",
             "Template subject",
             "<p>Template body</p>",
-            "Template body"));
+            "Template body",
+            headers));
 
         result.ProviderMessageId.Should().BeNull();
         legacySender.Messages.Should().ContainSingle();
@@ -246,6 +255,177 @@ public sealed class SqlOSTransactionalEmailTests
         legacySender.Messages[0].Subject.Should().Be("Template subject");
         legacySender.Messages[0].HtmlBody.Should().Be("<p>Template body</p>");
         legacySender.Messages[0].TextBody.Should().Be("Template body");
+        legacySender.Messages[0].Headers.Should().Equal(headers);
+    }
+
+    [TestMethod]
+    public async Task TransactionalEmail_ListUnsubscribe_SendsOneClickHeadersToAzure()
+    {
+        using var context = CreateContext();
+        var acs = new CapturingAcsHandler();
+        var sender = new SqlOSDefaultEmailSender(
+            new SqlOSAcsEmailSender(
+                Options.Create(new SqlOSEmailOptions
+                {
+                    AzureCommunicationServicesConnectionString = AcsTestConnectionString,
+                    FromAddress = "news@example.test"
+                }),
+                authOptions: null,
+                acs.CreateClientOptions()),
+            new LegacyAuthEmailSender());
+        var service = CreateEmailService(context, sender);
+        await AddTemplateAsync(context, "weekly-digest");
+
+        var result = await service.SendAsync(new SqlOSSendEmailRequest(
+            "weekly-digest",
+            "user@example.com",
+            new Dictionary<string, object?>
+            {
+                ["orderId"] = "123",
+                ["trackingUrl"] = "https://tracking.example.test/123"
+            },
+            ListUnsubscribe: new SqlOSEmailListUnsubscribe(
+                OneClickUrl: new Uri("https://app.example.test/unsubscribe/one-click?token=secret-unsubscribe-token"),
+                MailTo: new Uri("mailto:unsubscribe@example.test?subject=unsubscribe"))));
+
+        result.Status.Should().Be(SqlOSEmailDeliveryStatuses.Queued);
+        var request = acs.Requests.Should().ContainSingle().Subject;
+        request.GetProperty("senderAddress").GetString().Should().Be("news@example.test");
+        var headers = request.GetProperty("headers");
+        headers.EnumerateObject().Select(x => x.Name).Should().BeEquivalentTo(
+            ["List-Unsubscribe", "List-Unsubscribe-Post"]);
+        headers.GetProperty("List-Unsubscribe").GetString().Should().Be(
+            "<https://app.example.test/unsubscribe/one-click?token=secret-unsubscribe-token>, <mailto:unsubscribe@example.test?subject=unsubscribe>");
+        headers.GetProperty("List-Unsubscribe-Post").GetString().Should().Be("List-Unsubscribe=One-Click");
+
+        var delivery = await context.Set<SqlOSEmailDelivery>().AsNoTracking().SingleAsync();
+        System.Text.Json.JsonSerializer.Serialize(delivery).Should().NotContain("secret-unsubscribe-token");
+        (await context.Set<SqlOSAuditEvent>().Select(x => x.DataJson).ToListAsync())
+            .Should().NotContain(x => x != null && x.Contains("secret-unsubscribe-token"));
+    }
+
+    [TestMethod]
+    public async Task TransactionalEmail_WithoutListUnsubscribe_SendsNoHeadersToAzure()
+    {
+        using var context = CreateContext();
+        var acs = new CapturingAcsHandler();
+        var sender = new SqlOSAcsEmailSender(
+            Options.Create(new SqlOSEmailOptions
+            {
+                AzureCommunicationServicesConnectionString = AcsTestConnectionString,
+                FromAddress = "news@example.test"
+            }),
+            authOptions: null,
+            acs.CreateClientOptions());
+        var service = CreateEmailService(context, sender);
+        await AddTemplateAsync(context, "order-no-headers");
+
+        var result = await service.SendAsync(new SqlOSSendEmailRequest(
+            "order-no-headers",
+            "user@example.com",
+            new Dictionary<string, object?>
+            {
+                ["orderId"] = "123",
+                ["trackingUrl"] = "https://tracking.example.test/123"
+            }));
+
+        result.Status.Should().Be(SqlOSEmailDeliveryStatuses.Queued);
+        acs.Requests.Should().ContainSingle()
+            .Which.TryGetProperty("headers", out _).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task TransactionalEmail_ListUnsubscribe_MailtoOnly_OmitsOneClickPost()
+    {
+        using var context = CreateContext();
+        var sender = new FakeTransactionalEmailSender();
+        var service = CreateEmailService(context, sender);
+        await AddTemplateAsync(context, "order-mailto-unsubscribe");
+
+        await service.SendAsync(new SqlOSSendEmailRequest(
+            "order-mailto-unsubscribe",
+            "user@example.com",
+            new Dictionary<string, object?>
+            {
+                ["orderId"] = "123",
+                ["trackingUrl"] = "https://tracking.example.test/123"
+            },
+            ListUnsubscribe: new SqlOSEmailListUnsubscribe(
+                MailTo: new Uri("mailto:unsubscribe@example.test"))));
+
+        sender.Messages.Should().ContainSingle()
+            .Which.Headers.Should().Equal(new Dictionary<string, string>
+            {
+                ["List-Unsubscribe"] = "<mailto:unsubscribe@example.test>"
+            });
+    }
+
+    [TestMethod]
+    [DataRow(null, null, "*one-click HTTPS URL, a mailto URI, or both*")]
+    [DataRow("http://app.example.test/unsubscribe", null, "*one-click URL must be an absolute https URI*")]
+    [DataRow("unsubscribe?token=abc", null, "*one-click URL must be an absolute https URI*")]
+    [DataRow("mailto:unsubscribe@example.test", null, "*one-click URL must be an absolute https URI*")]
+    [DataRow("https://user:password@app.example.test/unsubscribe", null, "*one-click URL must not contain user info*")]
+    [DataRow("https://bücher.example.test/unsubscribe", null, "*one-click URL must be printable ASCII*")]
+    [DataRow(null, "https://app.example.test/unsubscribe", "*mailto URI must be an absolute mailto URI*")]
+    public async Task TransactionalEmail_InvalidListUnsubscribe_FailsBeforeDelivery(
+        string? oneClickUrl,
+        string? mailTo,
+        string expectedMessage)
+    {
+        using var context = CreateContext();
+        var sender = new FakeTransactionalEmailSender();
+        var service = CreateEmailService(context, sender);
+        await AddTemplateAsync(context, "order-invalid-unsubscribe");
+
+        var act = async () => await service.SendAsync(new SqlOSSendEmailRequest(
+            "order-invalid-unsubscribe",
+            "user@example.com",
+            new Dictionary<string, object?>
+            {
+                ["orderId"] = "123",
+                ["trackingUrl"] = "https://tracking.example.test/123"
+            },
+            ListUnsubscribe: new SqlOSEmailListUnsubscribe(
+                oneClickUrl == null ? null : new Uri(oneClickUrl, UriKind.RelativeOrAbsolute),
+                mailTo == null ? null : new Uri(mailTo, UriKind.RelativeOrAbsolute))));
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage(expectedMessage);
+        sender.Messages.Should().BeEmpty();
+        (await context.Set<SqlOSEmailDelivery>().AnyAsync()).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task DefaultEmailSender_AcsAuthFallback_SendsHeadersToAzure()
+    {
+        var acs = new CapturingAcsHandler();
+        var authOptions = new SqlOSAuthServerOptions();
+        authOptions.ConfigureEmailOtp(email =>
+        {
+            email.AzureCommunicationServicesConnectionString = AcsTestConnectionString;
+            email.FromAddress = "auth@example.test";
+        });
+        var sender = new SqlOSDefaultEmailSender(
+            new SqlOSAcsEmailSender(Options.Create(new SqlOSEmailOptions())),
+            new SqlOSAcsAuthEmailSender(Options.Create(authOptions), acs.CreateClientOptions()));
+
+        await sender.SendAsync(new SqlOSEmailMessage(
+            "user@example.com",
+            "Template subject",
+            "<p>Template body</p>",
+            "Template body",
+            new Dictionary<string, string>
+            {
+                ["List-Unsubscribe"] = "<https://app.example.test/unsubscribe/one-click?token=auth-fallback>",
+                ["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+            }));
+
+        var request = acs.Requests.Should().ContainSingle().Subject;
+        request.GetProperty("senderAddress").GetString().Should().Be("auth@example.test");
+        var headers = request.GetProperty("headers");
+        headers.GetProperty("List-Unsubscribe").GetString().Should().Be(
+            "<https://app.example.test/unsubscribe/one-click?token=auth-fallback>");
+        headers.GetProperty("List-Unsubscribe-Post").GetString().Should().Be("List-Unsubscribe=One-Click");
     }
 
     [TestMethod]
@@ -420,9 +600,12 @@ public sealed class SqlOSTransactionalEmailTests
         return new TestSqlOSInMemoryDbContext(options);
     }
 
+    private static readonly string AcsTestConnectionString =
+        $"endpoint=https://example.unitedstates.communication.azure.com/;accesskey={Convert.ToBase64String(new byte[32])}";
+
     private static SqlOSTransactionalEmailService CreateEmailService(
         TestSqlOSInMemoryDbContext context,
-        FakeTransactionalEmailSender sender)
+        ISqlOSEmailSender sender)
         => new(
             context,
             TestCryptoService.Create(context, Options.Create(new SqlOSAuthServerOptions())),
@@ -479,6 +662,67 @@ public sealed class SqlOSTransactionalEmailTests
             Messages.Add(message);
             return Task.FromResult(new SqlOSEmailProviderResult($"provider-{Messages.Count}"));
         }
+    }
+
+    /// <summary>Captures the JSON body the Azure Communication Services SDK sends and accepts the send.</summary>
+    private sealed class CapturingAcsHandler : HttpMessageHandler
+    {
+        public List<System.Text.Json.JsonElement> Requests { get; } = [];
+
+        public EmailClientOptions CreateClientOptions()
+        {
+            var options = new EmailClientOptions
+            {
+                Transport = new HttpClientTransport(this)
+            };
+            options.Retry.MaxRetries = 0;
+            return options;
+        }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            request.Method.Should().Be(HttpMethod.Post);
+            request.RequestUri!.AbsolutePath.Should().Be("/emails:send");
+            var body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            Requests.Add(System.Text.Json.JsonDocument.Parse(body).RootElement.Clone());
+
+            var response = new HttpResponseMessage(System.Net.HttpStatusCode.Accepted)
+            {
+                Content = new StreamContent(new NetworkLikeStream(System.Text.Encoding.UTF8.GetBytes(
+                    "{\"id\":\"acs-operation-1\",\"status\":\"Running\"}")))
+            };
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            response.Headers.Add(
+                "Operation-Location",
+                "https://example.unitedstates.communication.azure.com/emails/operations/acs-operation-1?api-version=2023-03-31");
+            return response;
+        }
+    }
+
+    /// <summary>
+    /// Non-seekable like a socket stream, so Azure.Core buffers it the way it buffers a real ACS response.
+    /// </summary>
+    private sealed class NetworkLikeStream(byte[] bytes) : Stream
+    {
+        private readonly MemoryStream _inner = new(bytes);
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class LegacyAuthEmailSender : ISqlOSAuthEmailSender

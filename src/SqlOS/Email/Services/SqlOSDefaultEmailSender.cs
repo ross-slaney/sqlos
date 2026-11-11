@@ -31,7 +31,7 @@ public sealed class SqlOSDefaultEmailSender : ISqlOSEmailSender
         if (_authEmailSender.IsConfigured)
         {
             await _authEmailSender.SendAsync(
-                new SqlOSAuthEmailMessage(message.To, message.Subject, message.HtmlBody, message.TextBody),
+                new SqlOSAuthEmailMessage(message.To, message.Subject, message.HtmlBody, message.TextBody, message.Headers),
                 cancellationToken);
             return new SqlOSEmailProviderResult(null);
         }

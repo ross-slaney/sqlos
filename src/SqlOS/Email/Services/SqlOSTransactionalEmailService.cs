@@ -55,6 +55,7 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
         var templateKey = NormalizeTemplateKey(request.TemplateKey);
         var recipient = NormalizeRecipient(request.To);
         var idempotencyKey = NormalizeIdempotencyKey(request.IdempotencyKey);
+        var headers = SqlOSListUnsubscribeHeaders.Build(request.ListUnsubscribe);
 
         if (_options.EnableIdempotency && idempotencyKey != null)
         {
@@ -105,7 +106,7 @@ public sealed class SqlOSTransactionalEmailService : ISqlOSTransactionalEmailSer
         try
         {
             var providerResult = await _sender.SendAsync(
-                new SqlOSEmailMessage(recipient, rendered.Subject, rendered.HtmlBody, rendered.TextBody),
+                new SqlOSEmailMessage(recipient, rendered.Subject, rendered.HtmlBody, rendered.TextBody, headers),
                 cancellationToken);
 
             delivery.Status = SqlOSEmailDeliveryStatuses.Queued;

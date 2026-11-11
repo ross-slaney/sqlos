@@ -501,7 +501,9 @@ var sent = await email.SendAsync(
 
 Inspect `sent.Status`. An unconfigured sender or provider failure normally returns `Status = "failed"` with `SanitizedError`; it is not reported only by an exception. A successful provider submission returns `Status = "queued"` plus the provider message ID when available.
 
-The configured `ISqlOSEmailSender` performs delivery. When Azure Communication Services is not your provider, register a custom implementation after `AddSqlOS` so it becomes the single service resolved by the sender pipeline. Built-in auth templates use the `auth.*` keys and are normally invoked by the corresponding AuthServer workflow. See [Transactional Email](/docs/guides/transactional-email) for provider configuration, retention, privacy, and built-in templates.
+Set `ListUnsubscribe: new SqlOSEmailListUnsubscribe(OneClickUrl: ..., MailTo: ...)` to add RFC 2369 `List-Unsubscribe` and RFC 8058 `List-Unsubscribe-Post` headers. SqlOS validates the URIs before it records a delivery and does not store them.
+
+The configured `ISqlOSEmailSender` performs delivery. When Azure Communication Services is not your provider, register a custom implementation after `AddSqlOS` so it becomes the single service resolved by the sender pipeline. A custom sender must copy `SqlOSEmailMessage.Headers` onto the outgoing message. Built-in auth templates use the `auth.*` keys and are normally invoked by the corresponding AuthServer workflow. See [Transactional Email](/docs/guides/transactional-email) for provider configuration, retention, privacy, and built-in templates.
 
 ## Calendar
 
