@@ -18,6 +18,14 @@ public sealed class SqlOSAcsEmailSender : ISqlOSEmailSender
     public SqlOSAcsEmailSender(
         IOptions<SqlOSEmailOptions> options,
         IOptions<SqlOSAuthServerOptions>? authOptions = null)
+        : this(options, authOptions, clientOptions: null)
+    {
+    }
+
+    internal SqlOSAcsEmailSender(
+        IOptions<SqlOSEmailOptions> options,
+        IOptions<SqlOSAuthServerOptions>? authOptions,
+        EmailClientOptions? clientOptions)
     {
         var emailOptions = options.Value;
         var authEmailOptions = authOptions?.Value.EmailOtp;
@@ -37,7 +45,9 @@ public sealed class SqlOSAcsEmailSender : ISqlOSEmailSender
             try
             {
                 ValidateConnectionString(connectionString);
-                _client = new EmailClient(connectionString);
+                _client = clientOptions == null
+                    ? new EmailClient(connectionString)
+                    : new EmailClient(connectionString, clientOptions);
             }
             catch (Exception ex) when (ex is ArgumentException or FormatException)
             {
@@ -72,9 +82,25 @@ public sealed class SqlOSAcsEmailSender : ISqlOSEmailSender
             senderAddress: _fromAddress!,
             recipients: new EmailRecipients([new EmailAddress(message.To)]),
             content: content);
+        ApplyHeaders(email, message.Headers);
 
         var operation = await _client!.SendAsync(WaitUntil.Started, email, cancellationToken);
         return new SqlOSEmailProviderResult(operation.Id);
+    }
+
+    internal static void ApplyHeaders(
+        Azure.Communication.Email.EmailMessage email,
+        IReadOnlyDictionary<string, string>? headers)
+    {
+        if (headers == null)
+        {
+            return;
+        }
+
+        foreach (var (name, value) in headers)
+        {
+            email.Headers[name] = value;
+        }
     }
 
     private static void ValidateConnectionString(string connectionString)
