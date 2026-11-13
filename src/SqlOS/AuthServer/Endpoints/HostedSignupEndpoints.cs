@@ -175,6 +175,51 @@ public static partial class EndpointRouteBuilderExtensions
                     return ssoRedirect;
                 }
 
+                if (await SqlOSSignupOrchestration.EmailHasAccountAsync(dbContext, email, cancellationToken))
+                {
+                    // The wrong door: the address has an account, so its password signs it in.
+                    var authentication = await SqlOSSignupOrchestration.SignInExistingAccountAsync(() =>
+                        authorizationServerService.AuthenticatePasswordAsync(
+                            email,
+                            password,
+                            cancellationToken,
+                            allowUnverifiedEmailForInvitation: invitation != null,
+                            httpContext: context,
+                            clientKey: authorizationRequest?.ClientApplication?.ClientId ?? authorizationRequest?.ClientApplicationId,
+                            authorizationRequestId: authorizationRequest?.Id,
+                            surface: authorizationRequest == null ? "hosted_standalone" : "hosted"));
+                    if (authorizationRequest == null)
+                    {
+                        var signedInOrganizationId = authentication.Organizations.FirstOrDefault()?.Id;
+                        if (!string.IsNullOrWhiteSpace(invitationToken))
+                        {
+                            var acceptance = await invitationService.AcceptEmailInvitationAsync(
+                                new SqlOSAcceptEmailInvitationRequest(invitationToken, authentication.User.Id) { AuthenticationMethod = authentication.AuthenticationMethod },
+                                context,
+                                cancellationToken);
+                            signedInOrganizationId = acceptance.OrganizationId;
+                        }
+
+                        await issuerSessionService.SignInAsync(context, authentication.User, signedInOrganizationId, authentication.AuthenticationMethod, cancellationToken);
+                        return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-in" : "invitation-accepted", deviceUserCode);
+                    }
+
+                    var signInCompletion = await authorizationServerService.CompleteCredentialSignInAsync(
+                        authorizationRequest,
+                        authentication.User,
+                        authentication.AuthenticationMethod,
+                        context,
+                        cancellationToken);
+                    return await RenderHostedAuthorizationCompletionAsync(
+                        signInCompletion,
+                        authorizationRequest,
+                        authentication.User.DefaultEmail,
+                        authPrefix,
+                        authorizationServerService,
+                        authService,
+                        cancellationToken);
+                }
+
                 if (SupportsDatabaseTransactions(dbContext))
                 {
                     transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);

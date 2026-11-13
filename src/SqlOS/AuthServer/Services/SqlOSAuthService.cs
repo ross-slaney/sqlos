@@ -103,6 +103,16 @@ public sealed class SqlOSAuthService
         var client = await _adminService.RequireClientAsync(request.ClientId, null, cancellationToken);
         await SqlOSDirectLoginPolicy.EnsureFirstPartyAsync(_adminService, client, httpContext, userId: null, cancellationToken);
 
+        if (await SqlOSSignupOrchestration.EmailHasAccountAsync(_context, input.Email, cancellationToken))
+        {
+            // The wrong door: the address has an account, so its password signs it in.
+            return await SqlOSSignupOrchestration.SignInExistingAccountAsync(() =>
+                LoginWithPasswordAsync(
+                    new SqlOSPasswordLoginRequest(input.Email, request.Password, request.ClientId, request.OrganizationId),
+                    httpContext,
+                    cancellationToken));
+        }
+
         SqlOSPasswordAuthenticationResult? signup = null;
         try
         {

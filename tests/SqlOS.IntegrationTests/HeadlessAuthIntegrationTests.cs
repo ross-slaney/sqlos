@@ -510,6 +510,43 @@ public sealed class HeadlessAuthIntegrationTests
     }
 
     [TestMethod]
+    public async Task SignUpAsync_WithPasswordForAnExistingAccount_SignsInOrSaysToSignIn()
+    {
+        var hookCalls = 0;
+        await using var fixture = await CreateFixtureAsync(headless =>
+        {
+            headless.OnHeadlessSignupAsync = (_, _) =>
+            {
+                hookCalls++;
+                return Task.CompletedTask;
+            };
+        });
+        var email = $"wrong-door-password-{Guid.NewGuid():N}@example.com";
+        var existing = await fixture.AdminService.CreateUserAsync(new SqlOSCreateUserRequest("Existing Ada", email, "P@ssword123!"));
+
+        var wrongRequest = await CreateHeadlessRequestAsync(fixture, "state-wrong-password");
+        var wrong = await fixture.HeadlessAuthService.SignUpAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessSignupRequest(wrongRequest.Id, "Someone Else", email, "Another-P@ssword-9", null, null));
+        wrong.Type.Should().Be("view");
+        wrong.ViewModel!.View.Should().Be("signup");
+        wrong.ViewModel.Error.Should().Be("An account already exists for this email. Sign in with its password instead.");
+
+        var rightRequest = await CreateHeadlessRequestAsync(fixture, "state-right-password");
+        var right = await fixture.HeadlessAuthService.SignUpAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessSignupRequest(rightRequest.Id, "Someone Else", email, "P@ssword123!", "Unwanted Org", null));
+        right.Type.Should().Be("redirect");
+        right.RedirectUrl.Should().Contain("code=");
+        right.RedirectUrl.Should().Contain("state=state-right-password");
+        (await fixture.Context.Set<SqlOSAuthorizationCode>().SingleAsync(x => x.AuthorizationRequestId == rightRequest.Id))
+            .UserId.Should().Be(existing.Id);
+        hookCalls.Should().Be(0, "a sign-in is not a sign-up");
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(1);
+        (await fixture.Context.Set<SqlOSOrganization>().AnyAsync(x => x.Name == "Unwanted Org")).Should().BeFalse();
+    }
+
+    [TestMethod]
     public async Task VerifyEmailOtpSignupAsync_ForAnExistingAccount_SignsThatAccountIn()
     {
         await using var fixture = await CreateFixtureAsync();

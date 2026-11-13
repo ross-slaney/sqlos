@@ -1650,6 +1650,32 @@ public sealed class SqlOSHeadlessAuthService
                 return ssoRedirect;
             }
 
+            if (await SqlOSSignupOrchestration.EmailHasAccountAsync(_context, email, cancellationToken))
+            {
+                // The wrong door: the address has an account, so its password signs it in.
+                var authentication = await SqlOSSignupOrchestration.SignInExistingAccountAsync(() =>
+                    _authorizationServerService.AuthenticatePasswordAsync(
+                        email,
+                        request.Password,
+                        cancellationToken,
+                        allowUnverifiedEmailForInvitation: !string.IsNullOrWhiteSpace(authorizationRequest.InvitationId),
+                        httpContext: httpContext,
+                        clientKey: authorizationRequest.ClientApplication?.ClientId ?? authorizationRequest.ClientApplicationId,
+                        authorizationRequestId: authorizationRequest.Id,
+                        surface: "headless"));
+                var signInCompletion = await _authorizationServerService.CompleteCredentialSignInAsync(
+                    authorizationRequest,
+                    authentication.User,
+                    authentication.AuthenticationMethod,
+                    httpContext,
+                    cancellationToken);
+                return await BuildCompletionActionResultAsync(
+                    authorizationRequest,
+                    signInCompletion,
+                    email,
+                    cancellationToken);
+            }
+
             if (SupportsDatabaseTransactions())
             {
                 transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
