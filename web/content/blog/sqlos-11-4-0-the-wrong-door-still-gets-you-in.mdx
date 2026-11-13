@@ -1,0 +1,32 @@
+---
+title: "SqlOS 11.4.0: the wrong door still gets you in"
+description: "Email-code sign-up with an existing account signs in, and sign-in with a new address asks for a name, without revealing which accounts exist."
+date: "2026-11-13"
+author: "Ross Slaney"
+tags: ["AuthServer", "SqlOS", "Security"]
+---
+
+People tap the wrong button. Someone with an account taps Create account; someone new taps Sign in. Until now, SqlOS email codes handled both badly.
+
+- **Create account with an existing address.** The code arrived, but entering it answered "The sign-in code is invalid or expired."
+- **Sign in with a new address.** No code was sent, and the page waited for one.
+
+SqlOS 11.4.0 handles both doors.
+
+- **Sign-up code for an address that already has an active account.** It signs that account in, exactly as a sign-in code would: consent, organization selection, MFA and invitations included. The name and organization typed at sign-up are ignored. This works on the headless API, the hosted AuthPage and the direct first-party API.
+- **Sign-in start for an address with no account.** In headless and hosted authorization flows, SqlOS sends a sign-up code to that address. Entering it returns a new step, `email-otp-signup-complete`, which asks only for a name. `flow.emailOtp.signupComplete({ displayName })` then creates the account on the same path as a sign-up code, running your `OnHeadlessSignupAsync` hook.
+
+Neither door reveals whether an account exists. Both start responses are identical either way. Only the person who can read the mailbox, by entering the code, learns which case they were in.
+
+The direct first-party JSON sign-in start (`/sqlos/auth/email-otp/start`) is unchanged. It has no step to collect a name, so it still sends nothing to an unknown address.
+
+## Upgrade
+
+```bash
+dotnet add package SqlOS --version 11.4.0
+npm install @sqlos/headless@11.4.0
+```
+
+There is no schema change. A headless UI should render the new `email-otp-signup-complete` view: a name field that calls `flow.emailOtp.signupComplete`. A UI that already renders whatever view comes back will show its fallback until it adds the step.
+
+Read [Email OTP](/docs/authserver/email-otp) for both doors, and the [headless JS reference](/docs/reference/headless-js) for the new view and action.
