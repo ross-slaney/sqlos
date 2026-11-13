@@ -41,6 +41,12 @@ public sealed record SqlOSEmailOtpSignupVerifyRequest(
     string ChallengeToken,
     string Code);
 
+public sealed record SqlOSEmailOtpSignupCompleteRequest(
+    string SignupToken,
+    string DisplayName,
+    string? OrganizationName = null,
+    JsonObject? CustomFields = null);
+
 public sealed record SqlOSResolvedCredentialSettings(
     string[] EnabledCredentialTypes,
     bool PasswordEnabled,

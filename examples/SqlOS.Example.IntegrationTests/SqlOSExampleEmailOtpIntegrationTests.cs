@@ -329,6 +329,113 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         sessionJson.RootElement.GetProperty("token").GetProperty("organizationId").GetString().Should().Be(organizationId);
     }
 
+    [TestMethod]
+    public async Task HostedEmailOtpLogin_ForAnUnknownAddress_AsksForANameAndCreatesTheAccount()
+    {
+        using var factory = CreateOtpFactory(enableHeadlessAuthPage: false);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var sender = factory.Services.GetRequiredService<TestAuthEmailSender>();
+        var email = $"hosted-new-{Guid.NewGuid():N}@example.com";
+        const string verifier = "hosted-email-otp-new-address-verifier-123456789";
+        var (requestId, antiforgeryToken) = await OpenHostedAuthorizeAsync(client, verifier, "hosted-new-address");
+
+        var startResponse = await client.PostAsync("/sqlos/auth/login/email-otp/start", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = requestId,
+            ["email"] = email,
+            ["__RequestVerificationToken"] = antiforgeryToken
+        }));
+        startResponse.EnsureSuccessStatusCode();
+        var challengeToken = ExtractHiddenInput(await startResponse.Content.ReadAsStringAsync(), "challengeToken");
+
+        var verifyResponse = await client.PostAsync("/sqlos/auth/login/email-otp/verify", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = requestId,
+            ["email"] = email,
+            ["challengeToken"] = challengeToken,
+            ["code"] = sender.GetLatestCode(email),
+            ["__RequestVerificationToken"] = antiforgeryToken
+        }));
+        verifyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var namePage = await verifyResponse.Content.ReadAsStringAsync();
+        namePage.Should().Contain("/sqlos/auth/signup/email-otp/complete");
+        var signupToken = ExtractHiddenInput(namePage, "signupToken");
+
+        var completeResponse = await client.PostAsync("/sqlos/auth/signup/email-otp/complete", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = requestId,
+            ["email"] = email,
+            ["signupToken"] = signupToken,
+            ["displayName"] = "Hosted Newcomer",
+            ["__RequestVerificationToken"] = antiforgeryToken
+        }));
+
+        completeResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var tokenResponse = await ExchangeAuthCodeAsync(client, completeResponse.Headers.Location!.ToString(), verifier);
+        tokenResponse.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
+    }
+
+    [TestMethod]
+    public async Task HostedEmailOtpSignup_ForAnExistingAccount_SignsThatAccountIn()
+    {
+        using var factory = CreateOtpFactory(enableHeadlessAuthPage: false);
+        using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        var sender = factory.Services.GetRequiredService<TestAuthEmailSender>();
+        var email = $"hosted-existing-{Guid.NewGuid():N}@example.com";
+        var organizationId = await CreateOrganizationAsync(client, $"Hosted Existing Org {Guid.NewGuid():N}");
+        var userId = await CreateUserAsync(client, email, "Hosted Existing", "P@ssword123!");
+        await CreateMembershipAsync(client, organizationId, userId, "member");
+        const string verifier = "hosted-email-otp-existing-signup-verifier-123456789";
+        var (requestId, antiforgeryToken) = await OpenHostedAuthorizeAsync(client, verifier, "hosted-existing-signup");
+
+        var startResponse = await client.PostAsync("/sqlos/auth/signup/email-otp/start", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = requestId,
+            ["email"] = email,
+            ["displayName"] = "Not Me",
+            ["__RequestVerificationToken"] = antiforgeryToken
+        }));
+        startResponse.EnsureSuccessStatusCode();
+        var verifyPage = await startResponse.Content.ReadAsStringAsync();
+
+        var verifyResponse = await client.PostAsync("/sqlos/auth/signup/email-otp/verify", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["requestId"] = requestId,
+            ["email"] = email,
+            ["signupToken"] = ExtractHiddenInput(verifyPage, "signupToken"),
+            ["challengeToken"] = ExtractHiddenInput(verifyPage, "challengeToken"),
+            ["code"] = sender.GetLatestCode(email),
+            ["__RequestVerificationToken"] = antiforgeryToken
+        }));
+
+        verifyResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
+        var tokenResponse = await ExchangeAuthCodeAsync(client, verifyResponse.Headers.Location!.ToString(), verifier);
+        var accessToken = tokenResponse.RootElement.GetProperty("access_token").GetString();
+        var sessionRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/auth/session");
+        sessionRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var sessionResponse = await client.SendAsync(sessionRequest);
+        sessionResponse.EnsureSuccessStatusCode();
+        var sessionJson = JsonDocument.Parse(await sessionResponse.Content.ReadAsStringAsync());
+        sessionJson.RootElement.GetProperty("token").GetProperty("organizationId").GetString().Should().Be(organizationId);
+    }
+
+    private static async Task<(string RequestId, string AntiforgeryToken)> OpenHostedAuthorizeAsync(HttpClient client, string verifier, string state)
+    {
+        var authorizeResponse = await client.GetAsync(QueryHelpers.AddQueryString("/sqlos/auth/authorize", new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = "example-web",
+            ["redirect_uri"] = "http://localhost:3000/auth/callback",
+            ["state"] = state,
+            ["scope"] = "openid profile email",
+            ["code_challenge"] = CreateCodeChallenge(verifier),
+            ["code_challenge_method"] = "S256"
+        }));
+        authorizeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var html = await authorizeResponse.Content.ReadAsStringAsync();
+        return (ExtractHiddenInput(html, "requestId"), ExtractHiddenInput(html, "__RequestVerificationToken"));
+    }
+
     private static WebApplicationFactory<Program> CreateOtpFactory(bool enableHeadlessAuthPage)
         => ExampleApiFixture.CreateFactory(builder =>
         {

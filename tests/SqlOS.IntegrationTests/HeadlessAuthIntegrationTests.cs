@@ -510,6 +510,172 @@ public sealed class HeadlessAuthIntegrationTests
     }
 
     [TestMethod]
+    public async Task VerifyEmailOtpSignupAsync_ForAnExistingAccount_SignsThatAccountIn()
+    {
+        await using var fixture = await CreateFixtureAsync();
+        var email = $"wrong-door-signup-{Guid.NewGuid():N}@example.com";
+        var existing = await fixture.AdminService.CreateUserAsync(new SqlOSCreateUserRequest("Existing Ada", email, "P@ssword123!"));
+        var authorizationRequest = await CreateHeadlessRequestAsync(fixture, "state-wrong-door-signup");
+
+        var start = await fixture.HeadlessAuthService.RequestEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupStartRequest(authorizationRequest.Id, "Someone Else", email, "Unwanted Org", null));
+        start.ViewModel!.View.Should().Be("email-otp-signup-verify");
+
+        var wrongCode = await fixture.HeadlessAuthService.VerifyEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupVerifyRequest(authorizationRequest.Id, start.ViewModel.SignupToken!, start.ViewModel.ChallengeToken!, "000000"));
+        wrongCode.ViewModel!.View.Should().Be("email-otp-signup-verify");
+        wrongCode.ViewModel.Error.Should().Be("The sign-in code is invalid or expired.");
+
+        var result = await fixture.HeadlessAuthService.VerifyEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupVerifyRequest(
+                authorizationRequest.Id,
+                start.ViewModel.SignupToken!,
+                start.ViewModel.ChallengeToken!,
+                GetLatestCode(fixture.EmailSender, email)));
+
+        result.Type.Should().Be("redirect");
+        result.RedirectUrl.Should().Contain("code=");
+        result.RedirectUrl.Should().Contain("state=state-wrong-door-signup");
+        var code = await fixture.Context.Set<SqlOSAuthorizationCode>().SingleAsync(x => x.AuthorizationRequestId == authorizationRequest.Id);
+        code.UserId.Should().Be(existing.Id);
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(1);
+        (await fixture.Context.Set<SqlOSUser>().SingleAsync(x => x.Id == existing.Id)).DisplayName.Should().Be("Existing Ada");
+        (await fixture.Context.Set<SqlOSOrganization>().AnyAsync(x => x.Name == "Unwanted Org")).Should().BeFalse();
+        (await fixture.Context.Set<SqlOSEmailOtpChallenge>().AsNoTracking().SingleAsync(x => x.Email == email)).ConsumedAt.Should().NotBeNull();
+        (await fixture.Context.Set<SqlOSTemporaryToken>().AsNoTracking().AnyAsync(x => x.Purpose == "email_otp_signup" && x.ConsumedAt == null))
+            .Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task RequestEmailOtpAsync_ForAnUnknownAddress_AnswersLikeAnExistingOneAndSendsASignupCode()
+    {
+        await using var fixture = await CreateFixtureAsync();
+        var existingEmail = $"known-{Guid.NewGuid():N}@example.com";
+        var unknownEmail = $"unknown-{Guid.NewGuid():N}@example.com";
+        await fixture.AdminService.CreateUserAsync(new SqlOSCreateUserRequest("Known", existingEmail, "P@ssword123!"));
+        var existingRequest = await CreateHeadlessRequestAsync(fixture, "state-known");
+        var unknownRequest = await CreateHeadlessRequestAsync(fixture, "state-unknown");
+
+        var existingStart = await fixture.HeadlessAuthService.RequestEmailOtpAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpStartRequest(existingRequest.Id, existingEmail));
+        var unknownStart = await fixture.HeadlessAuthService.RequestEmailOtpAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpStartRequest(unknownRequest.Id, unknownEmail));
+
+        existingStart.ViewModel!.View.Should().Be("email-otp-verify");
+        unknownStart.ViewModel!.View.Should().Be("email-otp-verify");
+        unknownStart.ViewModel.Info!.Replace(MaskOf(unknownEmail), "*").Should().Be(existingStart.ViewModel.Info!.Replace(MaskOf(existingEmail), "*"));
+        fixture.EmailSender.Messages.Select(static message => message.To).Should().BeEquivalentTo(existingEmail, unknownEmail);
+    }
+
+    [TestMethod]
+    public async Task VerifyEmailOtpAsync_ForAnUnknownAddress_AsksForANameThenCreatesTheAccount()
+    {
+        var hookCalls = 0;
+        await using var fixture = await CreateFixtureAsync(headless =>
+        {
+            headless.OnHeadlessSignupAsync = (_, _) =>
+            {
+                hookCalls++;
+                return Task.CompletedTask;
+            };
+        });
+        var email = $"wrong-door-login-{Guid.NewGuid():N}@example.com";
+        var authorizationRequest = await CreateHeadlessRequestAsync(fixture, "state-wrong-door-login");
+
+        var start = await fixture.HeadlessAuthService.RequestEmailOtpAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpStartRequest(authorizationRequest.Id, email));
+        var verify = await fixture.HeadlessAuthService.VerifyEmailOtpAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpVerifyRequest(authorizationRequest.Id, start.ViewModel!.ChallengeToken!, GetLatestCode(fixture.EmailSender, email)));
+
+        verify.Type.Should().Be("view");
+        verify.ViewModel!.View.Should().Be("email-otp-signup-complete");
+        verify.ViewModel.Email.Should().Be(email);
+        var signupToken = verify.ViewModel.SignupToken!;
+        signupToken.Should().NotBeNullOrWhiteSpace();
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(0);
+
+        var missingName = await fixture.HeadlessAuthService.CompleteEmailOtpSignupAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpSignupCompleteRequest(authorizationRequest.Id, signupToken, "  "));
+        missingName.ViewModel!.View.Should().Be("email-otp-signup-complete");
+        missingName.ViewModel.Error.Should().Be("Display name is required.");
+        missingName.ViewModel.SignupToken.Should().Be(signupToken);
+
+        var otherRequest = await CreateHeadlessRequestAsync(fixture, "state-other");
+        var wrongRequest = await fixture.HeadlessAuthService.CompleteEmailOtpSignupAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpSignupCompleteRequest(otherRequest.Id, signupToken, "Ada"));
+        wrongRequest.ViewModel!.Error.Should().Be("The sign-in code is invalid or expired.");
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(0);
+
+        var complete = await fixture.HeadlessAuthService.CompleteEmailOtpSignupAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpSignupCompleteRequest(authorizationRequest.Id, signupToken, "Ada Lovelace"));
+
+        complete.Type.Should().Be("redirect");
+        complete.RedirectUrl.Should().Contain("code=");
+        complete.RedirectUrl.Should().Contain("state=state-wrong-door-login");
+        hookCalls.Should().Be(1);
+        var stored = await fixture.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.Email == email);
+        stored.IsVerified.Should().BeTrue();
+        (await fixture.Context.Set<SqlOSUser>().SingleAsync(x => x.Id == stored.UserId)).DisplayName.Should().Be("Ada Lovelace");
+        (await fixture.Context.Set<SqlOSMembership>().CountAsync(x => x.UserId == stored.UserId)).Should().Be(1);
+
+        var replay = await fixture.HeadlessAuthService.CompleteEmailOtpSignupAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpSignupCompleteRequest(authorizationRequest.Id, signupToken, "Ada Again"));
+        replay.Type.Should().Be("view");
+        replay.ViewModel!.Error.Should().Be("The sign-in code is invalid or expired.");
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task CompleteEmailOtpSignupAsync_WhenTheAddressWasClaimedMeanwhile_CreatesNothing()
+    {
+        await using var fixture = await CreateFixtureAsync();
+        var email = $"claimed-{Guid.NewGuid():N}@example.com";
+        var authorizationRequest = await CreateHeadlessRequestAsync(fixture, "state-claimed");
+
+        var start = await fixture.HeadlessAuthService.RequestEmailOtpAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpStartRequest(authorizationRequest.Id, email));
+        var verify = await fixture.HeadlessAuthService.VerifyEmailOtpAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpVerifyRequest(authorizationRequest.Id, start.ViewModel!.ChallengeToken!, GetLatestCode(fixture.EmailSender, email)));
+        await fixture.AdminService.CreateUserAsync(new SqlOSCreateUserRequest("First", email, "P@ssword123!"));
+
+        var complete = await fixture.HeadlessAuthService.CompleteEmailOtpSignupAsync(
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpSignupCompleteRequest(authorizationRequest.Id, verify.ViewModel!.SignupToken!, "Second"));
+
+        complete.Type.Should().Be("view");
+        complete.ViewModel!.Error.Should().Be("The sign-in code is invalid or expired.");
+        (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(1);
+        (await fixture.Context.Set<SqlOSAuthorizationCode>().CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id)).Should().Be(0);
+    }
+
+    private static string MaskOf(string email)
+    {
+        var at = email.IndexOf('@');
+        return $"{email[..2]}***{email[at..]}";
+    }
+
+    private static Task<SqlOSAuthorizationRequest> CreateHeadlessRequestAsync(HeadlessFixture fixture, string state)
+        => fixture.AuthorizationServerService.CreateAuthorizationRequestAsync(
+            new SqlOSAuthorizeRequestInput(
+                "code",
+                fixture.ClientId,
+                fixture.RedirectUri,
+                state,
+                "openid profile email",
+                ValidPkceCodeChallenge,
+                "S256",
+                null,
+                null,
+                null,
+                null,
+                "headless",
+                null));
+
+    [TestMethod]
     public async Task RequestEmailOtpAsync_WithInvitationForUnknownEmail_ReturnsSignupViewWithoutPhantomChallenge()
     {
         await using var fixture = await CreateFixtureAsync();

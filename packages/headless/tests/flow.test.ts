@@ -168,6 +168,32 @@ describe("createHeadlessFlow", () => {
     expect(flow.authorization?.code).toBe("otp-code");
   });
 
+  it("takes a sign-in code for an address with no account through the name step", async () => {
+    const fetch = createFetch((url, init) => {
+      if (url.includes("/requests/")) {
+        return viewModel({ view: "email-otp-verify", challengeToken: "challenge_1" });
+      }
+      if (url.endsWith("/email-otp/verify")) {
+        return {
+          type: "view",
+          viewModel: viewModel({ view: "email-otp-signup-complete", email: "new@example.com", signupToken: "verified_1" }),
+        };
+      }
+      if (url.endsWith("/signup/email-otp/complete")) {
+        expect(readBody(init)).toMatchObject({ requestId: "req_1", signupToken: "verified_1", displayName: "Ada" });
+        return { type: "redirect", redirectUrl: `${redirectUri}?code=new-account` };
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    const flow = createHeadlessFlow({ issuer, clientId, redirectUri, fetch });
+    await flow.resume("https://app.example.com/auth/authorize?request=req_1");
+    await flow.emailOtp.verify({ code: "123456" });
+    expect(flow.viewModel?.view).toBe("email-otp-signup-complete");
+    expect(flow.viewModel?.email).toBe("new@example.com");
+    await flow.emailOtp.signupComplete({ displayName: "Ada" });
+    expect(flow.authorization?.code).toBe("new-account");
+  });
+
   it("maps field errors from the view model", async () => {
     const fetch = createFetch((url) => {
       if (url.includes("/requests/")) {

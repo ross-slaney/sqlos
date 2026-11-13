@@ -56,7 +56,10 @@ POST /sqlos/auth/headless/email-otp/start
 POST /sqlos/auth/headless/email-otp/verify
 POST /sqlos/auth/headless/signup/email-otp/start
 POST /sqlos/auth/headless/signup/email-otp/verify
+POST /sqlos/auth/headless/signup/email-otp/complete
 ```
+
+Wrong doors are handled without revealing accounts. A signup code for an address that already has an active account signs that account in. A sign-in start for an address with no account sends a sign-up code; a correct code returns `email-otp-signup-complete` with a verified `signupToken`, and `/signup/email-otp/complete` takes the name and creates the account. The direct first-party `/sqlos/auth/email-otp/start` keeps sending nothing to unknown addresses.
 
 The signup flow preserves `customFields`, which lets app-owned UIs pass profile and onboarding context while SqlOS still owns the auth transaction.
 

@@ -98,6 +98,7 @@ const actions: Record<HeadlessActionPath, (flow: HeadlessFlow) => Promise<unknow
   "/magic-link/complete": (flow) => flow.magicLink.complete({ token: "ml_1", invitationToken: "inv_1" }),
   "/signup/email-otp/start": (flow) => flow.emailOtp.signupStart({ displayName: "Ada", organizationName: "Acme", customFields: { a: 1 }, invitationToken: "inv_1" }),
   "/signup/email-otp/verify": (flow) => flow.emailOtp.signupVerify({ code: "123456", invitationToken: "inv_1" }),
+  "/signup/email-otp/complete": (flow) => flow.emailOtp.signupComplete({ displayName: "Ada", organizationName: "Acme", customFields: { a: 1 }, invitationToken: "inv_1" }),
   "/invitations/signup": (flow) => flow.invitation.signup({ displayName: "Ada", customFields: { a: 1 }, invitationToken: "inv_1" }),
   "/phone-otp/start": (flow) => flow.phoneOtp.start({ phoneNumber: "+12025550148", invitationToken: "inv_1" }),
   "/phone-otp/verify": (flow) => flow.phoneOtp.verify({ code: "123456", invitationToken: "inv_1" }),

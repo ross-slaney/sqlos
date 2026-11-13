@@ -292,7 +292,7 @@ The core transition rule stays the same. Add only the views your enabled policy 
 
 | Returned view or branch | What the UI must do | Focused documentation |
 | --- | --- | --- |
-| `email-otp`, `email-otp-verify`, `email-otp-signup-verify` | Start or verify an inbox code while retaining challenge/signup tokens | [Email-code onboarding](/docs/guides/email-otp-onboarding) |
+| `email-otp`, `email-otp-verify`, `email-otp-signup-verify`, `email-otp-signup-complete` | Start or verify an inbox code while retaining challenge/signup tokens; ask for a name when a sign-in code proved a new address | [Email-code onboarding](/docs/guides/email-otp-onboarding) |
 | `magic-link`, `magic-link-sent` | Send an opt-in sign-in link (`flow.magicLink.start`); consume the emailed token with `flow.magicLink.complete({ token })` — there is no headless confirm view | [Magic-link login](/docs/authserver/magic-link) |
 | `phone-otp`, `phone-otp-verify`, `phone-otp-signup`, `phone-otp-signup-verify` | Start or verify a Twilio code | [SMS mobile sign-in](/docs/guides/sms-mobile-sign-in) |
 | `signup` | Submit display name, email, password, organization name, and optional custom fields | [Password login](/docs/authserver/password-login) |

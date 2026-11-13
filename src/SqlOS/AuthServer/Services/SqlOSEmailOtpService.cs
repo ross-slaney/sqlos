@@ -69,7 +69,8 @@ public sealed class SqlOSEmailOtpService
             requestedOrganizationId: null,
             httpContext,
             cancellationToken,
-            purpose: "login");
+            purpose: "login",
+            signupWhenNoAccount: true);
     }
 
     public async Task<SqlOSEmailOtpSignupStartResult> StartSignupForAuthorizationRequestAsync(
@@ -282,6 +283,65 @@ public sealed class SqlOSEmailOtpService
         bool requireAuthorizationRequestMatch,
         CancellationToken cancellationToken = default)
     {
+        var (signupToken, token, payload, challenge) = await CheckSignupCodeAsync(
+            request,
+            expectedAuthorizationRequestId,
+            requireAuthorizationRequestMatch,
+            cancellationToken);
+        await RecordVerifySucceededAsync(challenge, cancellationToken);
+        return await SignupVerificationAsync(signupToken, token, payload, challenge, cancellationToken);
+    }
+
+    /// <summary>
+    /// Checks a sign-up code like <see cref="VerifySignupAsync"/>, except that a correct code for an
+    /// address that already has an active account signs that account in: the code proved the
+    /// mailbox, so the person gets the sign-in they meant instead of an invalid-code error. The
+    /// sign-up token and the challenge are spent in that case. The start response never said which
+    /// case it was, and only the mailbox owner can reach this answer.
+    /// </summary>
+    public async Task<SqlOSEmailOtpSignupOutcome> VerifySignupOrSignInAsync(
+        SqlOSEmailOtpSignupVerifyRequest request,
+        string? expectedAuthorizationRequestId,
+        bool requireAuthorizationRequestMatch,
+        CancellationToken cancellationToken = default)
+    {
+        var (signupToken, token, payload, challenge) = await CheckSignupCodeAsync(
+            request,
+            expectedAuthorizationRequestId,
+            requireAuthorizationRequestMatch,
+            cancellationToken);
+
+        if (challenge.User is { IsActive: true } existingUser)
+        {
+            _ = await _cryptoService.ConsumeTemporaryTokenAsync("email_otp_signup", signupToken, cancellationToken)
+                ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+            await SpendVerifiedChallengeAsync(challenge, cancellationToken);
+            await RecordVerifySucceededAsync(challenge, cancellationToken);
+            await RecordOtpAuditAsync(
+                "email_otp.signup_existing_email_signed_in",
+                MaskEmail(challenge.Email),
+                "signup",
+                challenge.IpAddress,
+                new { challenge.ClientApplicationId, challenge.AuthorizationRequestId },
+                cancellationToken);
+            var organizations = await _adminService.GetUserOrganizationsAsync(existingUser.Id, cancellationToken);
+            return new SqlOSEmailOtpSignupOutcome(
+                Signup: null,
+                SignIn: new SqlOSEmailOtpVerificationResult(challenge, existingUser, organizations, "email_otp"));
+        }
+
+        await RecordVerifySucceededAsync(challenge, cancellationToken);
+        return new SqlOSEmailOtpSignupOutcome(
+            Signup: await SignupVerificationAsync(signupToken, token, payload, challenge, cancellationToken),
+            SignIn: null);
+    }
+
+    private async Task<(string SignupToken, SqlOSTemporaryToken Token, EmailOtpSignupPayload Payload, SqlOSEmailOtpChallenge Challenge)> CheckSignupCodeAsync(
+        SqlOSEmailOtpSignupVerifyRequest request,
+        string? expectedAuthorizationRequestId,
+        bool requireAuthorizationRequestMatch,
+        CancellationToken cancellationToken)
+    {
         await EnsureEmailOtpEnabledAsync(cancellationToken);
 
         var signupToken = request.SignupToken?.Trim()
@@ -322,8 +382,16 @@ public sealed class SqlOSEmailOtpService
             expectedAuthorizationRequestId,
             requireAuthorizationRequestMatch,
             cancellationToken);
-        await RecordVerifySucceededAsync(challenge, cancellationToken);
+        return (signupToken, token, payload, challenge);
+    }
 
+    private async Task<SqlOSEmailOtpSignupVerificationResult> SignupVerificationAsync(
+        string signupToken,
+        SqlOSTemporaryToken token,
+        EmailOtpSignupPayload payload,
+        SqlOSEmailOtpChallenge challenge,
+        CancellationToken cancellationToken)
+    {
         if (challenge.User != null)
         {
             await RecordOtpAuditAsync(
@@ -408,6 +476,166 @@ public sealed class SqlOSEmailOtpService
         }
     }
 
+    /// <summary>
+    /// Checks a sign-in code. A correct code for an active account signs it in, as
+    /// <see cref="VerifyAsync(SqlOSEmailOtpVerifyRequest, string?, bool, CancellationToken)"/> does.
+    /// A correct code for an address with no account (sign-in start sent it a sign-up code, see
+    /// <see cref="StartForAuthorizationRequestAsync"/>) offers to create the account instead: the code
+    /// is spent and a one-use verified sign-up token comes back, which
+    /// <see cref="VerifySignupCompletionAsync"/> turns into a sign-up once the person gives a name.
+    /// Codes from the direct first-party start are never sent to unknown addresses, so they never
+    /// offer a sign-up.
+    /// </summary>
+    public async Task<SqlOSEmailOtpSignInOutcome> VerifyOrOfferSignupAsync(
+        SqlOSEmailOtpVerifyRequest request,
+        string? expectedAuthorizationRequestId,
+        bool requireAuthorizationRequestMatch,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureEmailOtpEnabledAsync(cancellationToken);
+
+        var challenge = await CheckChallengeCodeAsync(
+            request,
+            expectedAuthorizationRequestId,
+            requireAuthorizationRequestMatch,
+            cancellationToken);
+        await SpendVerifiedChallengeAsync(challenge, cancellationToken);
+        await RecordVerifySucceededAsync(challenge, cancellationToken);
+
+        if (challenge.User is { IsActive: true } user)
+        {
+            var organizations = await _adminService.GetUserOrganizationsAsync(user.Id, cancellationToken);
+            return new SqlOSEmailOtpSignInOutcome(
+                SignIn: new SqlOSEmailOtpVerificationResult(challenge, user, organizations, "email_otp"),
+                Signup: null);
+        }
+
+        var sentByDirectStart = challenge.AuthorizationRequestId == null && challenge.ClientApplicationId != null;
+        if (challenge.UserId != null || challenge.UserEmailId != null || sentByDirectStart)
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        var claimed = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .FindByNormalizedEmailAsync(challenge.NormalizedEmail, challenge.Email, cancellationToken);
+        if (claimed != null)
+        {
+            await RecordOtpAuditAsync(
+                "email_otp.signup_existing_email_rejected",
+                MaskEmail(challenge.Email),
+                "signup",
+                challenge.IpAddress,
+                new
+                {
+                    challenge.ClientApplicationId,
+                    challenge.AuthorizationRequestId,
+                    reason = "email_claimed_after_challenge_started"
+                },
+                cancellationToken);
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        var signupToken = await _cryptoService.CreateTemporaryTokenAsync(
+            VerifiedSignupTokenPurpose,
+            userId: null,
+            clientApplicationId: challenge.ClientApplicationId,
+            organizationId: null,
+            payload: new EmailOtpVerifiedSignupPayload(
+                challenge.AuthorizationRequestId,
+                challenge.AuthorizationRequest?.ClientApplication?.ClientId ?? challenge.ClientApplication?.ClientId,
+                challenge.ClientApplicationId,
+                challenge.Email),
+            lifetime: _options.ChallengeLifetime,
+            cancellationToken);
+        await RecordOtpAuditAsync(
+            "email_otp.signup_offered",
+            MaskEmail(challenge.Email),
+            "signup",
+            challenge.IpAddress,
+            new { challenge.ClientApplicationId, challenge.AuthorizationRequestId },
+            cancellationToken);
+
+        return new SqlOSEmailOtpSignInOutcome(
+            SignIn: null,
+            Signup: new SqlOSEmailOtpSignupOffer(signupToken, challenge.Email));
+    }
+
+    /// <summary>
+    /// Checks the name step that follows <see cref="VerifyOrOfferSignupAsync"/>: the verified sign-up
+    /// token, the display name, and that the address is still free. The result is the same shape a
+    /// sign-up code produces, so callers create the account on the path they already have; spend the
+    /// token with <see cref="ConsumeSignupTokenAsync(SqlOSEmailOtpSignupVerificationResult, CancellationToken)"/>
+    /// inside that transaction.
+    /// </summary>
+    public async Task<SqlOSEmailOtpSignupVerificationResult> VerifySignupCompletionAsync(
+        SqlOSEmailOtpSignupCompleteRequest request,
+        string? expectedAuthorizationRequestId,
+        bool requireAuthorizationRequestMatch,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureEmailOtpEnabledAsync(cancellationToken);
+
+        var displayName = request.DisplayName?.Trim();
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            throw new InvalidOperationException("Display name is required.");
+        }
+
+        var signupToken = request.SignupToken?.Trim()
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        var token = await _cryptoService.FindTemporaryTokenAsync(VerifiedSignupTokenPurpose, signupToken, cancellationToken)
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        var payload = _cryptoService.DeserializePayload<EmailOtpVerifiedSignupPayload>(token)
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+
+        if (requireAuthorizationRequestMatch
+            && !string.Equals(payload.AuthorizationRequestId ?? string.Empty, expectedAuthorizationRequestId ?? string.Empty, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        var claimed = await _context.Set<SqlOSUserEmail>()
+            .AsNoTracking()
+            .FindByEmailAsync(payload.Email, cancellationToken);
+        if (claimed != null)
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        return new SqlOSEmailOtpSignupVerificationResult(
+            signupToken,
+            token.ClientApplicationId ?? payload.ClientApplicationId,
+            payload.ClientId,
+            displayName,
+            payload.Email,
+            string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName.Trim(),
+            OrganizationId: null,
+            request.CustomFields)
+        {
+            CodeAlreadySpent = true
+        };
+    }
+
+    /// <summary>
+    /// Spends whichever token a sign-up verification came from: a sign-up code's token and its
+    /// challenge (<see cref="ConsumeSignupTokenAsync(string, CancellationToken)"/>), or the verified
+    /// token of the name step, whose challenge was spent when the code was checked.
+    /// </summary>
+    public async Task ConsumeSignupTokenAsync(
+        SqlOSEmailOtpSignupVerificationResult verification,
+        CancellationToken cancellationToken = default)
+    {
+        if (!verification.CodeAlreadySpent)
+        {
+            await ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+            return;
+        }
+
+        _ = await _cryptoService.ConsumeTemporaryTokenAsync(VerifiedSignupTokenPurpose, verification.SignupToken, cancellationToken)
+            ?? throw new InvalidOperationException("The sign-in code is invalid or expired.");
+    }
+
     private async Task<SqlOSEmailOtpChallenge> VerifyChallengeAsync(
         SqlOSEmailOtpVerifyRequest request,
         string? expectedAuthorizationRequestId,
@@ -420,6 +648,19 @@ public sealed class SqlOSEmailOtpService
             requireAuthorizationRequestMatch,
             cancellationToken);
 
+        await SpendVerifiedChallengeAsync(challenge, cancellationToken);
+        await RecordVerifySucceededAsync(challenge, cancellationToken);
+        return challenge;
+    }
+
+    /// <summary>
+    /// Spends a challenge whose code was checked and claims the address it proved. Shared by sign-in
+    /// and by a sign-up code that turned out to belong to an existing account.
+    /// </summary>
+    private async Task SpendVerifiedChallengeAsync(
+        SqlOSEmailOtpChallenge challenge,
+        CancellationToken cancellationToken)
+    {
         var now = DateTime.UtcNow;
         challenge.ConsumedAt = now;
 
@@ -453,9 +694,6 @@ public sealed class SqlOSEmailOtpService
         {
             throw new InvalidOperationException("The sign-in code is invalid or expired.");
         }
-
-        await RecordVerifySucceededAsync(challenge, cancellationToken);
-        return challenge;
     }
 
     /// <summary>
@@ -624,7 +862,8 @@ public sealed class SqlOSEmailOtpService
         HttpContext? httpContext,
         CancellationToken cancellationToken,
         bool sendWhenNoUser = false,
-        string purpose = "login")
+        string purpose = "login",
+        bool signupWhenNoAccount = false)
     {
         var trimmedEmail = RequireValidEmail(email);
         SqlOSEmailAddress.TryCanonicalize(trimmedEmail, out var typedAddress, out var normalizedEmail);
@@ -746,7 +985,13 @@ public sealed class SqlOSEmailOtpService
         _context.Set<SqlOSEmailOtpChallenge>().Add(challenge);
         await _context.SaveChangesAsync(cancellationToken);
 
-        if ((emailRecord?.User != null && emailRecord.User.IsActive) || sendWhenNoUser)
+        // Signing in with an address that has no account: the code goes to the typed address as a
+        // sign-up code, and a correct one offers to create the account (VerifyOrOfferSignupAsync).
+        // The response is the same either way; only the mailbox learns which door it was.
+        var offersSignup = signupWhenNoAccount && emailRecord == null;
+        var sendPurpose = offersSignup ? "signup" : purpose;
+        var sent = (emailRecord?.User != null && emailRecord.User.IsActive) || sendWhenNoUser || offersSignup;
+        if (sent)
         {
             try
             {
@@ -755,7 +1000,7 @@ public sealed class SqlOSEmailOtpService
                     MaskEmail(deliveryAddress),
                     code,
                     challenge.ExpiresAt,
-                    purpose,
+                    sendPurpose,
                     challenge.Id,
                     cancellationToken);
             }
@@ -785,7 +1030,7 @@ public sealed class SqlOSEmailOtpService
                 clientApplicationId,
                 authorizationRequestId,
                 requestedOrganizationId,
-                sent = (emailRecord?.User != null && emailRecord.User.IsActive) || sendWhenNoUser
+                sent
             },
             cancellationToken);
 
@@ -795,7 +1040,9 @@ public sealed class SqlOSEmailOtpService
             maskedEmail,
             purpose == "signup"
                 ? $"Check {maskedEmail} for a sign-up code."
-                : $"If an account exists for {maskedEmail}, check your email for a sign-in code.",
+                : signupWhenNoAccount
+                    ? $"Check {maskedEmail} for a code."
+                    : $"If an account exists for {maskedEmail}, check your email for a sign-in code.",
             challenge.ExpiresAt,
             challenge.LastSentAt.Add(_options.ResendCooldown));
     }
@@ -1012,6 +1259,14 @@ public sealed class SqlOSEmailOtpService
             },
             cancellationToken);
 
+    private const string VerifiedSignupTokenPurpose = "email_otp_signup_verified";
+
+    private sealed record EmailOtpVerifiedSignupPayload(
+        string? AuthorizationRequestId,
+        string? ClientId,
+        string? ClientApplicationId,
+        string Email);
+
     private sealed record EmailOtpSignupPayload(
         string ChallengeTokenHash,
         string? AuthorizationRequestId,
@@ -1038,4 +1293,23 @@ public sealed record SqlOSEmailOtpSignupVerificationResult(
     string Email,
     string? OrganizationName,
     string? OrganizationId,
-    JsonObject? CustomFields);
+    JsonObject? CustomFields)
+{
+    /// <summary>True for the name step after a sign-in code: the code's challenge is already spent.</summary>
+    public bool CodeAlreadySpent { get; init; }
+}
+
+/// <summary>A sign-up code's outcome: a new account to create, or the existing account it signs in.</summary>
+public sealed record SqlOSEmailOtpSignupOutcome(
+    SqlOSEmailOtpSignupVerificationResult? Signup,
+    SqlOSEmailOtpVerificationResult? SignIn);
+
+/// <summary>A sign-in code's outcome: the account it signs in, or an offer to create one for the address.</summary>
+public sealed record SqlOSEmailOtpSignInOutcome(
+    SqlOSEmailOtpVerificationResult? SignIn,
+    SqlOSEmailOtpSignupOffer? Signup);
+
+/// <summary>The verified sign-up token the name step completes, and the address it proved.</summary>
+public sealed record SqlOSEmailOtpSignupOffer(
+    string SignupToken,
+    string Email);

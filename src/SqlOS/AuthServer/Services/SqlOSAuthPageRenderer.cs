@@ -535,6 +535,23 @@ public static class SqlOSAuthPageRenderer
                 </form>
                 {{RenderFooterLinks($"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/signup", model.AuthorizationRequestId))}\">Start over</a>")}}
                 """,
+            "email-otp-signup-complete" => $$"""
+                {{RenderPanelIntro("Create your account", $"There's no account for {model.Email ?? "this email"} yet. Add your name to create one.")}}
+                <form class="auth-form" method="post" action="{{Html(AuthPath(model, "/signup/email-otp/complete"))}}">
+                  {{requestIdInput}}
+                  {{invitationTokenInput}}
+                  {{deviceUserCodeInput}}
+                  <input type="hidden" name="signupToken" value="{{Html(model.SignupToken ?? string.Empty)}}" />
+                  <input type="hidden" name="email" value="{{emailValue}}" />
+                  <label class="field">
+                    <span>Display name</span>
+                    <input name="displayName" value="{{Html(model.DisplayName ?? string.Empty)}}" placeholder="Jane Doe" autocomplete="name" required autofocus />
+                  </label>
+                  {{organizationField}}
+                  {{RenderPrimaryAction("Create account", "Creating account")}}
+                </form>
+                {{RenderFooterLinks($"<a class=\"secondary-link\" href=\"{Html(AuthPath(model, "/login", model.AuthorizationRequestId))}\">Use a different email</a>")}}
+                """,
             "organization" => $$"""
                 {{RenderPanelIntro("Organization", "Choose the workspace you want to continue into.")}}
                 <form class="auth-form organization-form" method="post" action="{{Html(AuthPath(model, "/login/select-organization"))}}">

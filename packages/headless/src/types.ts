@@ -268,6 +268,12 @@ export interface HeadlessFlow {
       invitationToken?: string;
     }): Promise<HeadlessFlowStatus>;
     signupVerify(input: { code: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
+    signupComplete(input: {
+      displayName: string;
+      organizationName?: string;
+      customFields?: JsonObject;
+      invitationToken?: string;
+    }): Promise<HeadlessFlowStatus>;
   };
   magicLink: {
     start(input?: { email?: string; invitationToken?: string }): Promise<HeadlessFlowStatus>;
