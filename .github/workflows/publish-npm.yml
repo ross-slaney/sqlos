@@ -120,17 +120,20 @@ jobs:
         working-directory: packages/headless
         run: npm publish --provenance --access public --tag "${{ steps.meta.outputs.tag }}"
       # npm often says the package "may take a few minutes to become available"
-      # after a successful publish. Keep retrying longer than the old 60s window.
+      # after a successful publish, and twice (#550's preview, the v11.4.0 release)
+      # it took just over three minutes. --prefer-online makes every attempt ask the
+      # registry instead of npm's local cache of the package document (max-age 300),
+      # and the window is ten minutes.
       - name: Verify published package
         run: |
-          for attempt in {1..36}; do
-            if npm view "${{ steps.meta.outputs.package_ref }}" version; then
+          for attempt in {1..40}; do
+            if npm view --prefer-online "${{ steps.meta.outputs.package_ref }}" version; then
               exit 0
             fi
-            echo "Package is not visible in npm yet; retrying ($attempt/36)."
-            sleep 5
+            echo "Package is not visible in npm yet; retrying ($attempt/40)."
+            sleep 15
           done
-          npm view "${{ steps.meta.outputs.package_ref }}" version
+          npm view --prefer-online "${{ steps.meta.outputs.package_ref }}" version
       - name: Comment package preview
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
