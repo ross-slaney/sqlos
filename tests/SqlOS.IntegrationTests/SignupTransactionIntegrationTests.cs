@@ -117,8 +117,10 @@ public sealed class SignupTransactionIntegrationTests
         start.SetResult();
         var outcomes = await Task.WhenAll(attempts);
 
-        outcomes.Count(static succeeded => succeeded).Should().Be(1);
-        outcomes.Count(static succeeded => !succeeded).Should().Be(3);
+        // One attempt creates the account. An attempt that arrives after it exists signs in with the
+        // same password (the wrong door, #549); one that races the insert loses at the unique email.
+        var signedIn = outcomes.Count(static succeeded => succeeded);
+        signedIn.Should().BeGreaterThanOrEqualTo(1);
         database.Context.ChangeTracker.Clear();
         var normalized = SqlOSAdminService.NormalizeEmail(email);
         var userId = await database.Context.Set<SqlOSUserEmail>()
@@ -128,7 +130,7 @@ public sealed class SignupTransactionIntegrationTests
         (await database.Context.Set<SqlOSAuditEvent>().CountAsync(x => x.EventType == "user.signup" && x.UserId == userId))
             .Should().Be(1);
         (await database.Context.Set<SqlOSSession>().CountAsync(x => x.UserId == userId))
-            .Should().Be(1);
+            .Should().Be(signedIn);
     }
 
     [TestMethod]

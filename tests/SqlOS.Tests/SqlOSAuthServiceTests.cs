@@ -11,6 +11,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
+using SqlOS.AuthServer.Errors;
 using SqlOS.AuthServer.Models;
 using SqlOS.AuthServer.Services;
 using SqlOS.Email.Configuration;
@@ -1166,6 +1167,44 @@ public sealed class SqlOSAuthServiceTests
         eventTypes.Should().Contain("password.login.failed");
         eventTypes.Should().Contain("password.login.locked");
         eventTypes.Should().Contain("password.login.rate_limit_rejected");
+    }
+
+    [TestMethod]
+    public async Task SignUpAsync_ForAnExistingAccount_WithItsPassword_SignsItIn()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var email = $"wrong-door-{Guid.NewGuid():N}@example.com";
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Existing Ada", email, "P@ssword123!"));
+
+        var result = await harness.Auth.SignUpAsync(
+            new SqlOSSignupRequest("Someone Else", email, "P@ssword123!", "Unwanted Org", "test-client", null),
+            new DefaultHttpContext());
+
+        result.Tokens.Should().NotBeNull();
+        (await harness.Context.Set<SqlOSSession>().SingleAsync()).UserId.Should().Be(user.Id);
+        (await harness.Context.Set<SqlOSUser>().SingleAsync(x => x.Id == user.Id)).DisplayName.Should().Be("Existing Ada");
+        (await harness.Context.Set<SqlOSOrganization>().AnyAsync(x => x.Name == "Unwanted Org")).Should().BeFalse();
+        (await harness.Context.Set<SqlOSAuditEvent>().AnyAsync(x => x.EventType == "user.signup")).Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task SignUpAsync_ForAnExistingAccount_WithAnotherPassword_SaysToSignIn()
+    {
+        var harness = await TestHarness.CreateAsync();
+        var email = $"wrong-door-{Guid.NewGuid():N}@example.com";
+        await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Existing Ada", email, "P@ssword123!"));
+
+        var act = async () => await harness.Auth.SignUpAsync(
+            new SqlOSSignupRequest("Someone Else", email, "Another-P@ssword-9", null, "test-client", null),
+            new DefaultHttpContext());
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("An account already exists for this email. Sign in with its password instead.");
+        (await harness.Context.Set<SqlOSSession>().AnyAsync()).Should().BeFalse();
+        (await harness.Context.Set<SqlOSUserEmail>()
+            .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(email))).Should().Be(1);
+        SqlOSPublicAuthErrorMapper.Map(new InvalidOperationException("An account already exists for this email. Sign in with its password instead."), SqlOSPublicAuthErrorSurface.HeadlessApi)
+            .PublicMessage.Should().Be("An account already exists for this email. Sign in with its password instead.");
     }
 
     [TestMethod]

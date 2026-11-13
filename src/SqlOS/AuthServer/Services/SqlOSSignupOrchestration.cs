@@ -21,6 +21,33 @@ internal static class SqlOSSignupOrchestration
     public const string InvitationEmailMismatchMessage = "This invitation was sent to another email address.";
     public const string UnauthorizedResourceMessage = "Requested resource is not allowed for this client.";
 
+    /// <summary>
+    /// A password sign-up for an address that already has an account, with a password that is not
+    /// that account's. A right password signs the account in instead (the wrong door, #549).
+    /// Sign-up already tells the caller an address is taken; this says what to do about it.
+    /// </summary>
+    public const string ExistingAccountSignInMessage = "An account already exists for this email. Sign in with its password instead.";
+
+    /// <summary>True when the address belongs to an account, so a password sign-up is a sign-in.</summary>
+    public static async Task<bool> EmailHasAccountAsync(ISqlOSAuthServerDbContext context, string email, CancellationToken cancellationToken)
+        => await context.Set<SqlOSUserEmail>().AsNoTracking().FindByEmailAsync(email.Trim(), cancellationToken) != null;
+
+    /// <summary>
+    /// Signs in through the password check sign-in uses (lockout, verification, MFA), answering a
+    /// wrong password with <see cref="ExistingAccountSignInMessage"/> instead of the generic failure.
+    /// </summary>
+    public static async Task<T> SignInExistingAccountAsync<T>(Func<Task<T>> signIn)
+    {
+        try
+        {
+            return await signIn();
+        }
+        catch (InvalidOperationException ex) when (string.Equals(ex.Message, SqlOSPasswordLoginAbuseService.PublicFailureMessage, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(ExistingAccountSignInMessage, ex);
+        }
+    }
+
     public sealed record PasswordSignupInput(
         string DisplayName,
         string Email,
