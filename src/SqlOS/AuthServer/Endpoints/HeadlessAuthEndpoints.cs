@@ -492,6 +492,27 @@ public static partial class EndpointRouteBuilderExtensions
             }
         });
 
+        headless.MapPost("/signup/email-otp/complete", async (
+            SqlOSHeadlessEmailOtpSignupCompleteRequest request,
+            HttpContext context,
+            SqlOSHeadlessAuthService headlessAuthService,
+            CancellationToken cancellationToken) =>
+        {
+            if (!headlessAuthService.IsApiEnabled)
+            {
+                return Results.NotFound();
+            }
+
+            try
+            {
+                return Results.Ok(await headlessAuthService.CompleteEmailOtpSignupAsync(context, request, cancellationToken));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return await PublicAuthJsonErrorAsync(context, ex, SqlOSPublicAuthErrorSurface.HeadlessApi, cancellationToken);
+            }
+        });
+
         headless.MapPost("/invitations/signup", async (
             SqlOSHeadlessInvitationSignupRequest request,
             HttpContext context,

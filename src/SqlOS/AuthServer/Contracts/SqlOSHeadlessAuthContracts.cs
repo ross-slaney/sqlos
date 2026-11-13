@@ -121,6 +121,15 @@ public sealed record SqlOSHeadlessEmailOtpSignupVerifyRequest(
     string Code,
     string? InvitationToken = null);
 
+/// <summary>The name step after a sign-in code proved an address with no account (<c>email-otp-signup-complete</c>).</summary>
+public sealed record SqlOSHeadlessEmailOtpSignupCompleteRequest(
+    string RequestId,
+    string SignupToken,
+    string DisplayName,
+    string? OrganizationName = null,
+    JsonObject? CustomFields = null,
+    string? InvitationToken = null);
+
 public sealed record SqlOSHeadlessPhoneOtpStartRequest(
     string RequestId,
     string PhoneNumber,

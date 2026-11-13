@@ -482,7 +482,6 @@ public static partial class EndpointRouteBuilderExtensions
             var code = form["code"].ToString();
             var invitationToken = ReadInvitationToken(context, form);
             var deviceUserCode = ReadDeviceUserCode(context, form);
-            IDbContextTransaction? transaction = null;
 
             try
             {
@@ -492,89 +491,49 @@ public static partial class EndpointRouteBuilderExtensions
                 email = invitation?.Email ?? email;
                 // Check the code before the sign-up transaction opens: a wrong code's attempt must
                 // survive the rollback below, or the code could be guessed without limit.
-                var signupVerification = await emailOtpService.VerifySignupAsync(
+                var outcome = await emailOtpService.VerifySignupOrSignInAsync(
                     new SqlOSEmailOtpSignupVerifyRequest(signupToken, challengeToken, code),
                     authorizationRequest?.Id,
                     requireAuthorizationRequestMatch: true,
                     cancellationToken);
 
-                if (SupportsDatabaseTransactions(dbContext))
+                if (outcome.SignIn is { } signIn)
                 {
-                    transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+                    // The address already has an account and the code proved it: sign that account in.
+                    return await HostedEmailOtpSignInAsync(
+                        context,
+                        signIn,
+                        authorizationRequest,
+                        invitation,
+                        requestId,
+                        invitationToken,
+                        deviceUserCode,
+                        authPrefix,
+                        authorizationServerService,
+                        authService,
+                        issuerSessionService,
+                        invitationService,
+                        cancellationToken);
                 }
 
-                // Claim the one-use artifacts before creating the account. Concurrent
-                // submissions must lose here, not at the unique email constraint.
-                // A later failure rolls consumption back with the account transaction.
-                if (transaction != null)
-                {
-                    await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
-                }
-
-                var signup = await authorizationServerService.SignUpWithEmailOtpAsync(
-                    signupVerification.DisplayName,
-                    signupVerification.Email,
-                    invitation == null ? signupVerification.OrganizationName : null,
-                    invitation == null ? authorizationRequest?.OrganizationId ?? signupVerification.OrganizationId : null,
-                    cancellationToken);
-
-                if (authorizationRequest == null)
-                {
-                    var organizationId = signup.Organizations.FirstOrDefault()?.Id;
-                    if (!string.IsNullOrWhiteSpace(invitationToken))
-                    {
-                        var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
-                            context,
-                            cancellationToken);
-                        organizationId = acceptance.OrganizationId;
-                    }
-
-                    await issuerSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
-                    if (transaction == null)
-                    {
-                        await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
-                    }
-                    if (transaction != null)
-                    {
-                        await transaction.CommitAsync(cancellationToken);
-                    }
-                    return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-up" : "invitation-accepted", deviceUserCode);
-                }
-
-                authorizationRequest.OrganizationId ??= invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
-                    authorizationRequest,
-                    signup.User,
-                    signup.AuthenticationMethod,
+                return await HostedEmailOtpCreateAccountAsync(
                     context,
-                    cancellationToken);
-
-                if (transaction == null)
-                {
-                    await emailOtpService.ConsumeSignupTokenAsync(signupVerification.SignupToken, cancellationToken);
-                }
-                if (transaction != null)
-                {
-                    await transaction.CommitAsync(cancellationToken);
-                }
-
-                return await RenderHostedAuthorizationCompletionAsync(
-                    completion,
+                    outcome.Signup!,
                     authorizationRequest,
-                    signup.User.DefaultEmail,
+                    invitation,
+                    invitationToken,
+                    deviceUserCode,
                     authPrefix,
                     authorizationServerService,
                     authService,
+                    issuerSessionService,
+                    emailOtpService,
+                    dbContext,
+                    invitationService,
                     cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
-                if (transaction != null)
-                {
-                    await transaction.RollbackAsync(cancellationToken);
-                }
-
                 var page = await BuildAuthPageViewModelAsync(
                     "email-otp-signup-verify",
                     requestId,
@@ -586,6 +545,73 @@ public static partial class EndpointRouteBuilderExtensions
                     authorizationServerService,
                     cancellationToken,
                     challengeToken: challengeToken,
+                    signupToken: signupToken,
+                    invitationToken: invitationToken,
+                    invitationService: invitationService,
+                    deviceUserCode: deviceUserCode);
+                return Html(page, StatusCodes.Status400BadRequest);
+            }
+        });
+
+        hostedForms.MapPost("/signup/email-otp/complete", async (
+            HttpContext context,
+            SqlOSAuthorizationServerService authorizationServerService,
+            SqlOSIssuerSessionService issuerSessionService,
+            SqlOSAuthService authService,
+            SqlOSEmailOtpService emailOtpService,
+            ISqlOSAuthServerDbContext dbContext,
+            SqlOSInvitationService invitationService,
+            CancellationToken cancellationToken) =>
+        {
+            var form = await context.Request.ReadFormAsync(cancellationToken);
+            var requestId = form["requestId"].ToString();
+            var email = form["email"].ToString();
+            var displayName = form["displayName"].ToString();
+            var organizationName = form["organizationName"].ToString();
+            var signupToken = form["signupToken"].ToString();
+            var invitationToken = ReadInvitationToken(context, form);
+            var deviceUserCode = ReadDeviceUserCode(context, form);
+
+            try
+            {
+                var authorizationRequest = await authorizationServerService.TryGetActiveAuthorizationRequestAsync(requestId, cancellationToken);
+                var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
+                    ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
+                var verification = await emailOtpService.VerifySignupCompletionAsync(
+                    new SqlOSEmailOtpSignupCompleteRequest(signupToken, displayName, organizationName),
+                    authorizationRequest?.Id,
+                    requireAuthorizationRequestMatch: true,
+                    cancellationToken);
+
+                return await HostedEmailOtpCreateAccountAsync(
+                    context,
+                    verification,
+                    authorizationRequest,
+                    invitation,
+                    invitationToken,
+                    deviceUserCode,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    issuerSessionService,
+                    emailOtpService,
+                    dbContext,
+                    invitationService,
+                    cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                var page = await BuildAuthPageViewModelAsync(
+                    "email-otp-signup-complete",
+                    requestId,
+                    email,
+                    await PublicAuthMessageAsync(context, ex, SqlOSPublicAuthErrorSurface.HostedPage, cancellationToken),
+                    displayName,
+                    null,
+                    authPrefix,
+                    authorizationServerService,
+                    cancellationToken,
+                    info: HostedSignupCompleteInfo,
                     signupToken: signupToken,
                     invitationToken: invitationToken,
                     invitationService: invitationService,
@@ -795,5 +821,110 @@ public static partial class EndpointRouteBuilderExtensions
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
+    }
+
+    /// <summary>
+    /// Creates the account a checked hosted sign-up proved (a sign-up code, or the name step after a
+    /// sign-in code) and signs it in, in one transaction with spending the sign-up token. A failure
+    /// rolls everything back and rethrows for the page to show.
+    /// </summary>
+    private static async Task<IResult> HostedEmailOtpCreateAccountAsync(
+        HttpContext context,
+        SqlOSEmailOtpSignupVerificationResult verification,
+        SqlOSAuthorizationRequest? authorizationRequest,
+        SqlOSEmailInvitationResult? invitation,
+        string? invitationToken,
+        string? deviceUserCode,
+        string authPrefix,
+        SqlOSAuthorizationServerService authorizationServerService,
+        SqlOSAuthService authService,
+        SqlOSIssuerSessionService issuerSessionService,
+        SqlOSEmailOtpService emailOtpService,
+        ISqlOSAuthServerDbContext dbContext,
+        SqlOSInvitationService invitationService,
+        CancellationToken cancellationToken)
+    {
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            if (SupportsDatabaseTransactions(dbContext))
+            {
+                transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+            }
+
+            // Claim the one-use artifacts before creating the account. Concurrent
+            // submissions must lose here, not at the unique email constraint.
+            // A later failure rolls consumption back with the account transaction.
+            if (transaction != null)
+            {
+                await emailOtpService.ConsumeSignupTokenAsync(verification, cancellationToken);
+            }
+
+            var signup = await authorizationServerService.SignUpWithEmailOtpAsync(
+                verification.DisplayName,
+                verification.Email,
+                invitation == null ? verification.OrganizationName : null,
+                invitation == null ? authorizationRequest?.OrganizationId ?? verification.OrganizationId : null,
+                cancellationToken);
+
+            if (authorizationRequest == null)
+            {
+                var organizationId = signup.Organizations.FirstOrDefault()?.Id;
+                if (!string.IsNullOrWhiteSpace(invitationToken))
+                {
+                    var acceptance = await invitationService.AcceptEmailInvitationInCurrentTransactionAsync(
+                        new SqlOSAcceptEmailInvitationRequest(invitationToken, signup.User.Id) { AuthenticationMethod = signup.AuthenticationMethod },
+                        context,
+                        cancellationToken);
+                    organizationId = acceptance.OrganizationId;
+                }
+
+                await issuerSessionService.SignInAsync(context, signup.User, organizationId, signup.AuthenticationMethod, cancellationToken);
+                if (transaction == null)
+                {
+                    await emailOtpService.ConsumeSignupTokenAsync(verification, cancellationToken);
+                }
+                if (transaction != null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-up" : "invitation-accepted", deviceUserCode);
+            }
+
+            authorizationRequest.OrganizationId ??= invitation?.OrganizationId ?? signup.Organizations.FirstOrDefault()?.Id;
+            var completion = await authorizationServerService.CompleteCredentialSignInAsync(
+                authorizationRequest,
+                signup.User,
+                signup.AuthenticationMethod,
+                context,
+                cancellationToken);
+
+            if (transaction == null)
+            {
+                await emailOtpService.ConsumeSignupTokenAsync(verification, cancellationToken);
+            }
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+
+            return await RenderHostedAuthorizationCompletionAsync(
+                completion,
+                authorizationRequest,
+                signup.User.DefaultEmail,
+                authPrefix,
+                authorizationServerService,
+                authService,
+                cancellationToken);
+        }
+        catch
+        {
+            if (transaction != null)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+            }
+
+            throw;
+        }
     }
 }

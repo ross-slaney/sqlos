@@ -64,7 +64,7 @@ With hosted AuthPage, SqlOS owns the full flow: email collection, home realm dis
 
 ## Headless flow
 
-Drive Email OTP with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.emailOtp.start` / `verify` / `signupStart` / `signupVerify`). The routes below are the HTTP wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui) and [Passwordless email-code onboarding](/docs/guides/email-otp-onboarding).
+Drive Email OTP with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.emailOtp.start` / `verify` / `signupStart` / `signupVerify` / `signupComplete`). The routes below are the HTTP wire contract; client code should use the package. See [Build your own login and signup UI](/docs/guides/custom-login-ui) and [Passwordless email-code onboarding](/docs/guides/email-otp-onboarding).
 
 | Endpoint | Purpose |
 | --- | --- |
@@ -72,6 +72,16 @@ Drive Email OTP with [`@sqlos/headless`](/docs/reference/headless-js) (`flow.ema
 | `POST /sqlos/auth/headless/email-otp/verify` | Verify an existing-user OTP sign-in |
 | `POST /sqlos/auth/headless/signup/email-otp/start` | Start a new-user OTP signup |
 | `POST /sqlos/auth/headless/signup/email-otp/verify` | Verify OTP signup and issue the redirect |
+| `POST /sqlos/auth/headless/signup/email-otp/complete` | Name step after a sign-in code proved an address with no account |
+
+### When someone picks the wrong door
+
+Both doors answer the same way whether or not the address has an account, and only the person who can read the inbox learns which case they are in:
+
+- **Sign-up with an address that already has an account.** The code goes to the account's address. Verifying it signs that account in, exactly like a sign-in code, and ignores the name and organization typed at sign-up.
+- **Sign-in with an address that has no account.** SqlOS sends a sign-up code to the typed address. Verifying it returns the `email-otp-signup-complete` view, which asks only for a name; `flow.emailOtp.signupComplete({ displayName })` then creates the account on the same path as a sign-up code, sign-up hook included.
+
+The hosted AuthPage does the same. The direct first-party JSON start (`/sqlos/auth/email-otp/start`) still sends nothing to an unknown address, because it has no name step.
 
 ```ts
 await flow.emailOtp.start({ email });

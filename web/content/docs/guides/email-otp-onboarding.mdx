@@ -284,14 +284,15 @@ A new challenge supersedes the previous active challenge in that signup context.
 
 ## Routing edge cases
 
-- Existing accounts are rejected from signup with an explicit “account already exists” error; send legitimate users to `flow.emailOtp.start` and `flow.emailOtp.verify` instead.
+- Signup with an address that already has an account sends the code to that account's address, and a correct code signs the account in. The signup fields are ignored. Render whatever the returned state is: usually a redirect, possibly organization selection or MFA.
+- Sign-in with an address that has no account sends a sign-up code, and a correct code returns `email-otp-signup-complete`. Ask for a name and call `flow.emailOtp.signupComplete({ displayName })`.
 - An SSO-governed email domain redirects to its identity provider before SqlOS creates an OTP challenge. Follow `flow.redirectUrl` with `window.location.assign`.
 - Self-service signup cannot join an existing organization by supplying `organizationId`; use an invitation.
 - A new invited user uses `flow.invitation.signup`, not a second signup OTP challenge.
 - Built-in OTP message bodies are intentionally suppressed from delivery-history previews because they contain codes.
 
-<Callout type="warning" title="Public signup reveals an existing account">
-  The current signup-start endpoint explicitly tells the caller when an account already exists for the email. Treat that as an enumeration surface: enforce the configured email/IP/client limits, add bot controls at the edge, monitor abuse, and confirm the disclosure fits your product's threat model.
+<Callout type="info" title="Start responses do not reveal accounts">
+  Signup start and sign-in start answer the same way whether or not an account exists. Only the mailbox owner, by entering the code, learns which door they were at. Keep the configured email, IP and client limits, since both starts send mail to any address.
 </Callout>
 
 ## Production checklist
@@ -299,11 +300,11 @@ A new challenge supersedes the previous active challenge in that signup context.
 - Open **Auth Server > Security > OTP communications readiness**, confirm Email OTP is ready, and perform one explicit test delivery to an operator-controlled inbox. The readiness read is local-only; the test is the provider proof.
 - Use HTTPS, PKCE S256, high-entropy state, and an exact redirect URI.
 - Let `@sqlos/headless` hold signup and challenge tokens; do not copy them into app state, URLs, or logs.
-- Treat existing-account disclosure as an explicit threat-model decision: the current signup endpoint is not account-enumeration resistant, so add bot controls, rate limits, and monitoring rather than claiming a generic response.
+- Both starts send mail to any address, so add bot controls, rate limits, and monitoring on them.
 - Tune per-email, IP, and client limits; alert on abuse and delivery failure rates.
 - Support paste and one-time-code autofill without auto-submitting an incomplete code.
 - Call `signupStart` again on resend and test that the old code fails.
-- Test wrong codes, max attempts, expiry, replay, superseded codes, existing accounts, SSO domains, and signup-hook rollback.
+- Test wrong codes, max attempts, expiry, replay, superseded codes, signup with an existing account, sign-in with no account, SSO domains, and signup-hook rollback.
 - Make the callback idempotent and store refresh tokens according to the client platform's security model.
 - Add Authenticator MFA or step-up for privileged actions after onboarding.
 

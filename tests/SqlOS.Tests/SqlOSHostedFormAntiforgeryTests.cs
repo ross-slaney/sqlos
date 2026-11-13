@@ -45,6 +45,7 @@ public sealed class SqlOSHostedFormAntiforgeryTests
         "/sqlos/auth/mfa/verify",
         "/sqlos/auth/password/forgot/submit",
         "/sqlos/auth/password/reset/submit",
+        "/sqlos/auth/signup/email-otp/complete",
         "/sqlos/auth/signup/email-otp/start",
         "/sqlos/auth/signup/email-otp/verify",
         "/sqlos/auth/signup/invitation/submit",

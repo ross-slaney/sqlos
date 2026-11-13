@@ -582,11 +582,32 @@ public sealed class SqlOSAuthService
         {
             // Check the code before the sign-up transaction opens: a wrong code's attempt must
             // survive the rollback below, or the code could be guessed without limit.
-            verification = await _emailOtpService.VerifySignupAsync(
+            var outcome = await _emailOtpService.VerifySignupOrSignInAsync(
                 request,
                 expectedAuthorizationRequestId: null,
                 requireAuthorizationRequestMatch: false,
                 cancellationToken);
+
+            if (outcome.SignIn is { } signIn)
+            {
+                // The address already has an account and the code proved it: sign that account in.
+                if (signIn.Challenge.ClientApplicationId == null)
+                {
+                    throw new InvalidOperationException("The sign-in code is invalid or expired.");
+                }
+
+                var signInClient = await _context.Set<SqlOSClientApplication>()
+                    .FirstAsync(x => x.Id == signIn.Challenge.ClientApplicationId, cancellationToken);
+                return await FinalizeClientLoginAsync(
+                    signIn.User,
+                    signInClient,
+                    signIn.Challenge.RequestedOrganizationId,
+                    signIn.AuthenticationMethod,
+                    httpContext,
+                    cancellationToken);
+            }
+
+            verification = outcome.Signup!;
 
             if (SupportsDatabaseTransactions())
             {

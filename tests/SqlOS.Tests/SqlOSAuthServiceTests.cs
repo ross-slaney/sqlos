@@ -1952,15 +1952,20 @@ public sealed class SqlOSAuthServiceTests
         harness.EmailSender.Messages.Select(static message => message.To)
             .Should().BeEquivalentTo(existingEmail, unknownEmail);
 
-        var existingVerify = async () => await harness.Auth.VerifyEmailOtpSignupAsync(
+        // The code proved the mailbox of an existing account: sign-up signs that account in.
+        var existingUser = await harness.Context.Set<SqlOSUserEmail>()
+            .SingleAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(existingEmail));
+        var existingResult = await harness.Auth.VerifyEmailOtpSignupAsync(
             new SqlOSEmailOtpSignupVerifyRequest(
                 existingStart.SignupToken,
                 existingStart.ChallengeToken,
                 GetLatestCode(harness.EmailSender, existingEmail)),
             new DefaultHttpContext());
 
-        await existingVerify.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("The sign-in code is invalid or expired.");
+        existingResult.Tokens.Should().NotBeNull();
+        (await harness.Context.Set<SqlOSSession>().SingleAsync()).UserId.Should().Be(existingUser.UserId);
+        (await harness.Context.Set<SqlOSUser>().SingleAsync(x => x.Id == existingUser.UserId)).DisplayName.Should().Be("Existing User");
+        (await harness.Context.Set<SqlOSOrganization>().AnyAsync(x => x.Name == "Uniform Org")).Should().BeFalse();
         (await harness.Context.Set<SqlOSUserEmail>()
             .CountAsync(x => x.NormalizedEmail == SqlOSAdminService.NormalizeEmail(existingEmail))).Should().Be(1);
         (await harness.Context.Set<SqlOSUserEmail>()
@@ -1968,6 +1973,38 @@ public sealed class SqlOSAuthServiceTests
         (await harness.Context.Set<SqlOSAuditEvent>()
             .AnyAsync(x => x.EventType == "email_otp.signup_existing_email"
                 && (x.DataJson ?? string.Empty).Contains("existing_email"))).Should().BeTrue();
+        (await harness.Context.Set<SqlOSAuditEvent>()
+            .AnyAsync(x => x.EventType == "email_otp.signup_existing_email_signed_in")).Should().BeTrue();
+
+        var replay = async () => await harness.Auth.VerifyEmailOtpSignupAsync(
+            new SqlOSEmailOtpSignupVerifyRequest(
+                existingStart.SignupToken,
+                existingStart.ChallengeToken,
+                GetLatestCode(harness.EmailSender, existingEmail)),
+            new DefaultHttpContext());
+        await replay.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in code is invalid or expired.");
+    }
+
+    [TestMethod]
+    public async Task VerifyEmailOtpSignupAsync_ExistingInactiveAccountKeepsTheGenericError()
+    {
+        var harness = await EmailOtpHarness.CreateAsync();
+        const string email = "inactive-signup@example.com";
+        var user = await harness.Admin.CreateUserAsync(new SqlOSCreateUserRequest("Inactive User", email, "P@ssword123!"));
+        var stored = await harness.Context.Set<SqlOSUser>().SingleAsync(x => x.Id == user.Id);
+        stored.IsActive = false;
+        await harness.Context.SaveChangesAsync();
+
+        var start = await harness.Auth.RequestEmailOtpSignupAsync(new SqlOSEmailOtpSignupStartRequest(
+            "Inactive User", email, "test-client", null, OrganizationId: null, CustomFields: null));
+        var verify = async () => await harness.Auth.VerifyEmailOtpSignupAsync(
+            new SqlOSEmailOtpSignupVerifyRequest(start.SignupToken, start.ChallengeToken, GetLatestCode(harness.EmailSender, email)),
+            new DefaultHttpContext());
+
+        await verify.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The sign-in code is invalid or expired.");
+        (await harness.Context.Set<SqlOSSession>().AnyAsync()).Should().BeFalse();
         (await harness.Context.Set<SqlOSAuditEvent>()
             .AnyAsync(x => x.EventType == "email_otp.signup_existing_email_rejected"
                 && (x.DataJson ?? string.Empty).Contains("challenge_bound_to_existing_user"))).Should().BeTrue();

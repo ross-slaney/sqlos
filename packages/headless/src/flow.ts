@@ -405,6 +405,29 @@ class HeadlessFlowImpl implements HeadlessFlow {
         );
       });
     },
+    /**
+     * The name step (`email-otp-signup-complete`): a sign-in code proved an address that has no
+     * account yet, so the person gives a name and the account is created.
+     */
+    signupComplete: async (input: {
+      displayName: string;
+      organizationName?: string;
+      customFields?: JsonObject;
+      invitationToken?: string;
+    }): Promise<HeadlessFlowStatus> => {
+      return this.run(async () => {
+        this.applyActionResult(
+          await this.post("/signup/email-otp/complete", {
+            requestId: this.requireRequestId(),
+            signupToken: this.requireToken("signupToken"),
+            displayName: input.displayName,
+            organizationName: input.organizationName,
+            customFields: input.customFields ?? {},
+            invitationToken: input.invitationToken ?? this.tokens.invitationToken,
+          }),
+        );
+      });
+    },
   };
 
   readonly magicLink = {

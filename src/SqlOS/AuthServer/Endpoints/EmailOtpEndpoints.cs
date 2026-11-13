@@ -175,95 +175,47 @@ public static partial class EndpointRouteBuilderExtensions
                 var invitation = await BindInvitationIfPresentAsync(invitationService, authorizationRequest, invitationToken, cancellationToken)
                     ?? await ResolveStandaloneInvitationAsync(invitationService, authorizationRequest, invitationToken, context, cancellationToken);
                 email = invitation?.Email ?? email;
-                var verification = await emailOtpService.VerifyAsync(
+                var outcome = await emailOtpService.VerifyOrOfferSignupAsync(
                     new SqlOSEmailOtpVerifyRequest(challengeToken, code),
                     authorizationRequest?.Id,
                     requireAuthorizationRequestMatch: true,
                     cancellationToken);
 
-                if (authorizationRequest == null)
+                if (outcome.Signup is { } offer)
                 {
-                    var organizationId = verification.Organizations.FirstOrDefault()?.Id;
-                    if (!string.IsNullOrWhiteSpace(invitationToken))
-                    {
-                        var acceptance = await invitationService.AcceptEmailInvitationAsync(
-                            new SqlOSAcceptEmailInvitationRequest(invitationToken, verification.User.Id) { AuthenticationMethod = verification.AuthenticationMethod },
-                            context,
-                            cancellationToken);
-                        organizationId = acceptance.OrganizationId;
-                    }
-
-                    await issuerSessionService.SignInAsync(
-                        context,
-                        verification.User,
-                        organizationId,
-                        verification.AuthenticationMethod,
-                        cancellationToken);
-                    return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-in" : "invitation-accepted", deviceUserCode);
-                }
-
-                if (!string.Equals(verification.Challenge.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
-                {
-                    throw new InvalidOperationException("The sign-in code is invalid or expired.");
-                }
-
-                var completion = await authorizationServerService.CompleteCredentialSignInAsync(
-                    authorizationRequest,
-                    verification.User,
-                    verification.AuthenticationMethod,
-                    context,
-                    cancellationToken);
-
-                if (completion.RequiresConsent)
-                {
+                    // The address has no account yet: the code proved it, so ask only for a name.
                     return Html(await BuildAuthPageViewModelAsync(
-                        "consent",
+                        "email-otp-signup-complete",
                         requestId,
-                        verification.Challenge.Email,
+                        offer.Email,
                         null,
                         null,
                         null,
                         authPrefix,
                         authorizationServerService,
                         cancellationToken,
-                        consentToken: completion.ConsentToken,
-                        consentScopes: completion.ConsentScopes));
-                }
-
-                if (completion.RequiresOrganizationSelection)
-                {
-                    var organizationPage = await BuildAuthPageViewModelAsync(
-                        "organization",
-                        requestId,
-                        verification.Challenge.Email,
-                        null,
-                        null,
-                        completion.PendingToken,
-                        authPrefix,
-                        authorizationServerService,
-                        cancellationToken,
-                        completion.Organizations,
+                        info: HostedSignupCompleteInfo,
+                        signupToken: offer.SignupToken,
                         invitationToken: invitationToken,
                         invitation: invitation,
-                        invitationService: invitationService);
-                    return Html(organizationPage);
+                        invitationService: invitationService,
+                        deviceUserCode: deviceUserCode));
                 }
 
-                if (completion.RequiresMfa)
-                {
-                    return await RenderMfaChallengeAsync(
-                        completion,
-                        requestId,
-                        verification.Challenge.Email,
-                        authPrefix,
-                        authorizationServerService,
-                        authService,
-                        cancellationToken,
-                        invitationToken: invitationToken,
-                        invitationService: invitationService);
-                }
-
-                return Results.Redirect(completion.RedirectUrl!);
+                return await HostedEmailOtpSignInAsync(
+                    context,
+                    outcome.SignIn!,
+                    authorizationRequest,
+                    invitation,
+                    requestId,
+                    invitationToken,
+                    deviceUserCode,
+                    authPrefix,
+                    authorizationServerService,
+                    authService,
+                    issuerSessionService,
+                    invitationService,
+                    cancellationToken);
             }
             catch (InvalidOperationException ex)
             {
@@ -284,5 +236,112 @@ public static partial class EndpointRouteBuilderExtensions
                 return Html(page, StatusCodes.Status400BadRequest);
             }
         });
+    }
+
+    private const string HostedSignupCompleteInfo = "There's no account for this email yet. Add your name to create one.";
+
+    /// <summary>
+    /// Finishes a hosted sign-in whose email code was checked: standalone (issuer session and any
+    /// invitation) or for an authorization request (consent, organization, MFA, redirect). Shared
+    /// by the sign-in code and by a sign-up code that proved an existing account.
+    /// </summary>
+    private static async Task<IResult> HostedEmailOtpSignInAsync(
+        HttpContext context,
+        SqlOSEmailOtpVerificationResult verification,
+        SqlOSAuthorizationRequest? authorizationRequest,
+        SqlOSEmailInvitationResult? invitation,
+        string requestId,
+        string? invitationToken,
+        string? deviceUserCode,
+        string authPrefix,
+        SqlOSAuthorizationServerService authorizationServerService,
+        SqlOSAuthService authService,
+        SqlOSIssuerSessionService issuerSessionService,
+        SqlOSInvitationService invitationService,
+        CancellationToken cancellationToken)
+    {
+        if (authorizationRequest == null)
+        {
+            var organizationId = verification.Organizations.FirstOrDefault()?.Id;
+            if (!string.IsNullOrWhiteSpace(invitationToken))
+            {
+                var acceptance = await invitationService.AcceptEmailInvitationAsync(
+                    new SqlOSAcceptEmailInvitationRequest(invitationToken, verification.User.Id) { AuthenticationMethod = verification.AuthenticationMethod },
+                    context,
+                    cancellationToken);
+                organizationId = acceptance.OrganizationId;
+            }
+
+            await issuerSessionService.SignInAsync(
+                context,
+                verification.User,
+                organizationId,
+                verification.AuthenticationMethod,
+                cancellationToken);
+            return RedirectAfterStandaloneSignIn(authPrefix, invitation == null ? "signed-in" : "invitation-accepted", deviceUserCode);
+        }
+
+        if (!string.Equals(verification.Challenge.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The sign-in code is invalid or expired.");
+        }
+
+        var completion = await authorizationServerService.CompleteCredentialSignInAsync(
+            authorizationRequest,
+            verification.User,
+            verification.AuthenticationMethod,
+            context,
+            cancellationToken);
+
+        if (completion.RequiresConsent)
+        {
+            return Html(await BuildAuthPageViewModelAsync(
+                "consent",
+                requestId,
+                verification.Challenge.Email,
+                null,
+                null,
+                null,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                consentToken: completion.ConsentToken,
+                consentScopes: completion.ConsentScopes));
+        }
+
+        if (completion.RequiresOrganizationSelection)
+        {
+            var organizationPage = await BuildAuthPageViewModelAsync(
+                "organization",
+                requestId,
+                verification.Challenge.Email,
+                null,
+                null,
+                completion.PendingToken,
+                authPrefix,
+                authorizationServerService,
+                cancellationToken,
+                completion.Organizations,
+                invitationToken: invitationToken,
+                invitation: invitation,
+                invitationService: invitationService);
+            return Html(organizationPage);
+        }
+
+        if (completion.RequiresMfa)
+        {
+            return await RenderMfaChallengeAsync(
+                completion,
+                requestId,
+                verification.Challenge.Email,
+                authPrefix,
+                authorizationServerService,
+                authService,
+                cancellationToken,
+                invitationToken: invitationToken,
+                invitationService: invitationService);
+        }
+
+        return Results.Redirect(completion.RedirectUrl!);
     }
 }

@@ -322,7 +322,8 @@ The default headless base is `/sqlos/auth/headless`. It can be moved with `AuthS
 | `POST` | `/phone-otp/verify` | Verify phone-code sign-in |
 | `POST` | `/signup` | Password signup |
 | `POST` | `/signup/email-otp/start` | Start email-code signup |
-| `POST` | `/signup/email-otp/verify` | Verify email-code signup |
+| `POST` | `/signup/email-otp/verify` | Verify email-code signup; signs in an existing account |
+| `POST` | `/signup/email-otp/complete` | Create the account after a sign-in code proved an address with no account |
 | `POST` | `/signup/phone-otp/start` | Start phone-code signup |
 | `POST` | `/signup/phone-otp/verify` | Verify phone-code signup |
 | `POST` | `/invitations/resolve` | Resolve an invitation for the current flow |

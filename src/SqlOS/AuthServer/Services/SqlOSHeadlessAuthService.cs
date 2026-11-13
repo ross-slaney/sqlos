@@ -873,12 +873,30 @@ public sealed class SqlOSHeadlessAuthService
 
         try
         {
-            var verification = await _emailOtpService.VerifyAsync(
+            var outcome = await _emailOtpService.VerifyOrOfferSignupAsync(
                 new SqlOSEmailOtpVerifyRequest(request.ChallengeToken, request.Code),
                 authorizationRequest.Id,
                 requireAuthorizationRequestMatch: true,
                 cancellationToken);
 
+            if (outcome.Signup is { } offer)
+            {
+                // The address has no account yet: the code proved it, so ask only for a name.
+                return View(await BuildViewModelAsync(
+                    authorizationRequest,
+                    "email-otp-signup-complete",
+                    error: null,
+                    pendingToken: null,
+                    email: offer.Email,
+                    displayName: null,
+                    fieldErrors: null,
+                    organizationSelection: null,
+                    info: SignupCompleteInfo,
+                    signupToken: offer.SignupToken,
+                    cancellationToken: cancellationToken));
+            }
+
+            var verification = outcome.SignIn!;
             if (!string.Equals(verification.Challenge.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("The sign-in code is invalid or expired.");
@@ -959,20 +977,149 @@ public sealed class SqlOSHeadlessAuthService
         var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
         await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
         var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
-        IDbContextTransaction? transaction = null;
-        SqlOSPasswordAuthenticationResult? signup = null;
-        SqlOSEmailOtpSignupVerificationResult? verification = null;
-
+        SqlOSEmailOtpSignupOutcome outcome;
         try
         {
             // Check the code before the sign-up transaction opens: a wrong code's attempt must
             // survive the rollback below, or the code could be guessed without limit.
-            verification = await _emailOtpService.VerifySignupAsync(
+            outcome = await _emailOtpService.VerifySignupOrSignInAsync(
                 new SqlOSEmailOtpSignupVerifyRequest(request.SignupToken, request.ChallengeToken, request.Code),
                 authorizationRequest.Id,
                 requireAuthorizationRequestMatch: true,
                 cancellationToken);
 
+            if (outcome.SignIn is { } signIn)
+            {
+                // The address already has an account and the code proved it: sign that account in.
+                var completion = await _authorizationServerService.CompleteCredentialSignInAsync(
+                    authorizationRequest,
+                    signIn.User,
+                    signIn.AuthenticationMethod,
+                    httpContext,
+                    cancellationToken);
+                return await BuildCompletionActionResultAsync(
+                    authorizationRequest,
+                    completion,
+                    signIn.Challenge.Email,
+                    cancellationToken);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await SignupVerifyErrorViewAsync(
+                authorizationRequest,
+                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
+                fieldErrors: null,
+                request.ChallengeToken,
+                request.SignupToken,
+                cancellationToken));
+        }
+
+        return await CreateEmailOtpAccountAsync(
+            httpContext,
+            authorizationRequest,
+            boundInvitation,
+            outcome.Signup!,
+            (error, fieldErrors) => SignupVerifyErrorViewAsync(
+                authorizationRequest,
+                error,
+                fieldErrors,
+                request.ChallengeToken,
+                request.SignupToken,
+                cancellationToken),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// The name step after a sign-in code proved an address with no account
+    /// (<c>email-otp-signup-complete</c>): creates the account exactly as a sign-up code does.
+    /// </summary>
+    public async Task<SqlOSHeadlessActionResult> CompleteEmailOtpSignupAsync(
+        HttpContext httpContext,
+        SqlOSHeadlessEmailOtpSignupCompleteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var authorizationRequest = await _authorizationServerService.GetRequiredAuthorizationRequestAsync(request.RequestId, cancellationToken);
+        await BindInvitationIfPresentAsync(authorizationRequest, request.InvitationToken, cancellationToken);
+        var boundInvitation = await GetBoundInvitationOrNullAsync(authorizationRequest, cancellationToken);
+
+        Task<SqlOSHeadlessViewModel> ErrorViewAsync(string? error, IReadOnlyDictionary<string, string>? fieldErrors)
+            => BuildViewModelAsync(
+                authorizationRequest,
+                "email-otp-signup-complete",
+                error,
+                pendingToken: null,
+                email: authorizationRequest.LoginHintEmail,
+                displayName: request.DisplayName,
+                fieldErrors: fieldErrors,
+                organizationSelection: null,
+                info: SignupCompleteInfo,
+                signupToken: request.SignupToken,
+                cancellationToken: cancellationToken);
+
+        SqlOSEmailOtpSignupVerificationResult verification;
+        try
+        {
+            verification = await _emailOtpService.VerifySignupCompletionAsync(
+                new SqlOSEmailOtpSignupCompleteRequest(request.SignupToken, request.DisplayName, request.OrganizationName, request.CustomFields),
+                authorizationRequest.Id,
+                requireAuthorizationRequestMatch: true,
+                cancellationToken);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return View(await ErrorViewAsync(await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken), null));
+        }
+
+        return await CreateEmailOtpAccountAsync(
+            httpContext,
+            authorizationRequest,
+            boundInvitation,
+            verification,
+            ErrorViewAsync,
+            cancellationToken);
+    }
+
+    private const string SignupCompleteInfo = "There's no account for this email yet. Add your name to create one.";
+
+    private Task<SqlOSHeadlessViewModel> SignupVerifyErrorViewAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        string? error,
+        IReadOnlyDictionary<string, string>? fieldErrors,
+        string challengeToken,
+        string signupToken,
+        CancellationToken cancellationToken)
+        => BuildViewModelAsync(
+            authorizationRequest,
+            "email-otp-signup-verify",
+            error,
+            pendingToken: null,
+            email: authorizationRequest.LoginHintEmail,
+            displayName: null,
+            fieldErrors: fieldErrors,
+            organizationSelection: null,
+            challengeToken: challengeToken,
+            signupToken: signupToken,
+            cancellationToken: cancellationToken);
+
+    /// <summary>
+    /// Creates the account a checked sign-up proved (a sign-up code, or the name step after a
+    /// sign-in code), runs the sign-up hook, and completes the authorization request, in one
+    /// transaction with spending the sign-up token.
+    /// </summary>
+    private async Task<SqlOSHeadlessActionResult> CreateEmailOtpAccountAsync(
+        HttpContext httpContext,
+        SqlOSAuthorizationRequest authorizationRequest,
+        SqlOSEmailInvitationResult? boundInvitation,
+        SqlOSEmailOtpSignupVerificationResult verification,
+        Func<string?, IReadOnlyDictionary<string, string>?, Task<SqlOSHeadlessViewModel>> errorViewAsync,
+        CancellationToken cancellationToken)
+    {
+        IDbContextTransaction? transaction = null;
+        SqlOSPasswordAuthenticationResult? signup = null;
+
+        try
+        {
             if (SupportsDatabaseTransactions())
             {
                 transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
@@ -982,7 +1129,7 @@ public sealed class SqlOSHeadlessAuthService
             // A losing concurrent submission gets the normal invalid-code response.
             if (transaction != null)
             {
-                await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+                await _emailOtpService.ConsumeSignupTokenAsync(verification, cancellationToken);
             }
 
             signup = await _authorizationServerService.SignUpWithEmailOtpAsync(
@@ -1022,7 +1169,7 @@ public sealed class SqlOSHeadlessAuthService
 
             if (transaction == null)
             {
-                await _emailOtpService.ConsumeSignupTokenAsync(verification.SignupToken, cancellationToken);
+                await _emailOtpService.ConsumeSignupTokenAsync(verification, cancellationToken);
             }
             await _adminService.RecordAuditAsync(
                 "user.signup.email_otp",
@@ -1054,23 +1201,12 @@ public sealed class SqlOSHeadlessAuthService
             {
                 await CleanupNonTransactionalSignupArtifactsAsync(
                     signup,
-                    boundInvitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? verification?.OrganizationId,
-                    boundInvitation == null ? verification?.OrganizationName : null,
+                    boundInvitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? verification.OrganizationId,
+                    boundInvitation == null ? verification.OrganizationName : null,
                     cancellationToken);
             }
 
-            return View(await BuildViewModelAsync(
-                authorizationRequest,
-                "email-otp-signup-verify",
-                ex.GlobalErrors.FirstOrDefault() ?? ex.Message,
-                pendingToken: null,
-                email: authorizationRequest.LoginHintEmail,
-                displayName: null,
-                fieldErrors: ex.FieldErrors,
-                organizationSelection: null,
-                challengeToken: request.ChallengeToken,
-                signupToken: request.SignupToken,
-                cancellationToken: cancellationToken));
+            return View(await errorViewAsync(ex.GlobalErrors.FirstOrDefault() ?? ex.Message, ex.FieldErrors));
         }
         catch (InvalidOperationException ex)
         {
@@ -1082,23 +1218,12 @@ public sealed class SqlOSHeadlessAuthService
             {
                 await CleanupNonTransactionalSignupArtifactsAsync(
                     signup,
-                    boundInvitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? verification?.OrganizationId,
-                    boundInvitation == null ? verification?.OrganizationName : null,
+                    boundInvitation?.OrganizationId ?? authorizationRequest.OrganizationId ?? verification.OrganizationId,
+                    boundInvitation == null ? verification.OrganizationName : null,
                     cancellationToken);
             }
 
-            return View(await BuildViewModelAsync(
-                authorizationRequest,
-                "email-otp-signup-verify",
-                await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken),
-                pendingToken: null,
-                email: authorizationRequest.LoginHintEmail,
-                displayName: null,
-                fieldErrors: null,
-                organizationSelection: null,
-                challengeToken: request.ChallengeToken,
-                signupToken: request.SignupToken,
-            cancellationToken: cancellationToken));
+            return View(await errorViewAsync(await PublicViewErrorMessageAsync(httpContext, ex, cancellationToken), null));
         }
     }
 
@@ -1959,6 +2084,7 @@ public sealed class SqlOSHeadlessAuthService
             "email-otp" => "email-otp",
             "email-otp-verify" => "email-otp-verify",
             "email-otp-signup-verify" => "email-otp-signup-verify",
+            "email-otp-signup-complete" => "email-otp-signup-complete",
             "magic-link" => "magic-link",
             "magic-link-sent" => "magic-link-sent",
             "phone-otp" => "phone-otp",

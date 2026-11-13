@@ -143,6 +143,7 @@ import { useHeadlessAuth } from "@sqlos/headless/react-native";
 | `email-otp` | Send a one-time code to the email | `emailOtp.start` |
 | `email-otp-verify` | Enter the emailed code | `emailOtp.verify` |
 | `email-otp-signup-verify` | Verify the code for an OTP signup | `emailOtp.signupVerify` |
+| `email-otp-signup-complete` | A sign-in code proved an address with no account: ask for a name | `emailOtp.signupComplete` |
 | `magic-link` | Send a sign-in link | `magicLink.start` |
 | `magic-link-sent` | Link sent; wait for the click | `magicLink.complete` (from the link) |
 | `phone-otp` | Send an SMS code | `phoneOtp.start` |
@@ -176,7 +177,7 @@ Render a fallback branch for views your UI does not draw (the in-repo examples s
 | `password.forgot({ email })` | `POST /password/forgot` |
 | `password.reset({ token, newPassword })` | `POST /password/reset` |
 | `emailOtp.start` / `verify` | `/email-otp/*` |
-| `emailOtp.signupStart` / `signupVerify` | `/signup/email-otp/*` |
+| `emailOtp.signupStart` / `signupVerify` / `signupComplete` | `/signup/email-otp/*` |
 | `magicLink.start` / `complete` | `/magic-link/*` |
 | `phoneOtp.*` | `/phone-otp/*` and `/signup/phone-otp/*` |
 | `signup({ displayName, password, ... })` | `POST /signup` |
