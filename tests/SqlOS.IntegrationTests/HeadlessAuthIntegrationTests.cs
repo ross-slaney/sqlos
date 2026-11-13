@@ -546,15 +546,16 @@ public sealed class HeadlessAuthIntegrationTests
         (await fixture.Context.Set<SqlOSOrganization>().AnyAsync(x => x.Name == "Unwanted Org")).Should().BeFalse();
         (await fixture.Context.Set<SqlOSEmailOtpChallenge>().AsNoTracking().SingleAsync(x => x.Email == email)).ConsumedAt.Should().NotBeNull();
 
-        var replay = await fixture.HeadlessAuthService.VerifyEmailOtpSignupAsync(
+        // The request is finished: replaying the code is refused before it is even checked.
+        var replay = async () => await fixture.HeadlessAuthService.VerifyEmailOtpSignupAsync(
             CreateHttpContext(),
             new SqlOSHeadlessEmailOtpSignupVerifyRequest(
                 authorizationRequest.Id,
                 start.ViewModel.SignupToken!,
                 start.ViewModel.ChallengeToken!,
                 GetLatestCode(fixture.EmailSender, email)));
-        replay.Type.Should().Be("view");
-        replay.ViewModel!.Error.Should().Be("The sign-in code is invalid or expired.");
+        await replay.Should().ThrowAsync<InvalidOperationException>();
+        (await fixture.Context.Set<SqlOSAuthorizationCode>().CountAsync(x => x.AuthorizationRequestId == authorizationRequest.Id)).Should().Be(1);
     }
 
     [TestMethod]
@@ -631,8 +632,10 @@ public sealed class HeadlessAuthIntegrationTests
         (await fixture.Context.Set<SqlOSAuthorizationCode>().SingleAsync(x => x.AuthorizationRequestId == authorizationRequest.Id))
             .UserId.Should().Be(stored.UserId);
 
+        // The verified token belongs to its own request, which is finished: another request cannot reuse it.
+        var freshRequest = await CreateHeadlessRequestAsync(fixture, "state-replay");
         var replay = await fixture.HeadlessAuthService.CompleteEmailOtpSignupAsync(
-            CreateHttpContext(), new SqlOSHeadlessEmailOtpSignupCompleteRequest(authorizationRequest.Id, signupToken, "Ada Again"));
+            CreateHttpContext(), new SqlOSHeadlessEmailOtpSignupCompleteRequest(freshRequest.Id, signupToken, "Ada Again"));
         replay.Type.Should().Be("view");
         replay.ViewModel!.Error.Should().Be("The sign-in code is invalid or expired.");
         (await fixture.Context.Set<SqlOSUserEmail>().CountAsync(x => x.Email == email)).Should().Be(1);
