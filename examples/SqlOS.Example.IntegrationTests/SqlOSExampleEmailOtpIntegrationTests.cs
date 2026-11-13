@@ -370,8 +370,8 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
             ["__RequestVerificationToken"] = antiforgeryToken
         }));
 
-        completeResponse.StatusCode.Should().Be(HttpStatusCode.Redirect);
-        var tokenResponse = await ExchangeAuthCodeAsync(client, completeResponse.Headers.Location!.ToString(), verifier);
+        // Hosted sign-up completions deliver the client redirect through the meta-refresh page.
+        var tokenResponse = await ExchangeAuthCodeAsync(client, (await ReadClientRedirectAsync(completeResponse)).ToString(), verifier);
         tokenResponse.RootElement.GetProperty("access_token").GetString().Should().NotBeNullOrWhiteSpace();
     }
 
@@ -417,6 +417,20 @@ public sealed class SqlOSExampleEmailOtpIntegrationTests
         sessionResponse.EnsureSuccessStatusCode();
         var sessionJson = JsonDocument.Parse(await sessionResponse.Content.ReadAsStringAsync());
         sessionJson.RootElement.GetProperty("token").GetProperty("organizationId").GetString().Should().Be(organizationId);
+    }
+
+    private static async Task<Uri> ReadClientRedirectAsync(HttpResponseMessage response)
+    {
+        if (response.StatusCode == HttpStatusCode.Redirect && response.Headers.Location is not null)
+        {
+            return response.Headers.Location;
+        }
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var html = await response.Content.ReadAsStringAsync();
+        var match = Regex.Match(html, "http-equiv=\"refresh\" content=\"0;url=([^\"]+)\"");
+        match.Success.Should().BeTrue("hosted POST completions deliver the client redirect via the meta-refresh interstitial");
+        return new Uri(WebUtility.HtmlDecode(match.Groups[1].Value), UriKind.RelativeOrAbsolute);
     }
 
     private static async Task<(string RequestId, string AntiforgeryToken)> OpenHostedAuthorizeAsync(HttpClient client, string verifier, string state)
