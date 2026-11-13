@@ -545,8 +545,16 @@ public sealed class HeadlessAuthIntegrationTests
         (await fixture.Context.Set<SqlOSUser>().SingleAsync(x => x.Id == existing.Id)).DisplayName.Should().Be("Existing Ada");
         (await fixture.Context.Set<SqlOSOrganization>().AnyAsync(x => x.Name == "Unwanted Org")).Should().BeFalse();
         (await fixture.Context.Set<SqlOSEmailOtpChallenge>().AsNoTracking().SingleAsync(x => x.Email == email)).ConsumedAt.Should().NotBeNull();
-        (await fixture.Context.Set<SqlOSTemporaryToken>().AsNoTracking().AnyAsync(x => x.Purpose == "email_otp_signup" && x.ConsumedAt == null))
-            .Should().BeFalse();
+
+        var replay = await fixture.HeadlessAuthService.VerifyEmailOtpSignupAsync(
+            CreateHttpContext(),
+            new SqlOSHeadlessEmailOtpSignupVerifyRequest(
+                authorizationRequest.Id,
+                start.ViewModel.SignupToken!,
+                start.ViewModel.ChallengeToken!,
+                GetLatestCode(fixture.EmailSender, email)));
+        replay.Type.Should().Be("view");
+        replay.ViewModel!.Error.Should().Be("The sign-in code is invalid or expired.");
     }
 
     [TestMethod]
@@ -620,7 +628,8 @@ public sealed class HeadlessAuthIntegrationTests
         var stored = await fixture.Context.Set<SqlOSUserEmail>().SingleAsync(x => x.Email == email);
         stored.IsVerified.Should().BeTrue();
         (await fixture.Context.Set<SqlOSUser>().SingleAsync(x => x.Id == stored.UserId)).DisplayName.Should().Be("Ada Lovelace");
-        (await fixture.Context.Set<SqlOSMembership>().CountAsync(x => x.UserId == stored.UserId)).Should().Be(1);
+        (await fixture.Context.Set<SqlOSAuthorizationCode>().SingleAsync(x => x.AuthorizationRequestId == authorizationRequest.Id))
+            .UserId.Should().Be(stored.UserId);
 
         var replay = await fixture.HeadlessAuthService.CompleteEmailOtpSignupAsync(
             CreateHttpContext(), new SqlOSHeadlessEmailOtpSignupCompleteRequest(authorizationRequest.Id, signupToken, "Ada Again"));
