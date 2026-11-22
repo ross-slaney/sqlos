@@ -1,0 +1,30 @@
+---
+title: "SqlOS 11.5.0: call the provider as the person"
+description: "A social login connection can keep the provider's tokens, so your server can call GitHub, Google or Microsoft as the person who signed in."
+date: "2026-11-21"
+author: "Ross Slaney"
+tags: ["AuthServer", "SqlOS", "OAuth", "Dashboard"]
+---
+
+Until now, SqlOS used a social provider's tokens only to read the person's profile and then dropped them. An application that signed people in with GitHub could not push a branch as that person afterwards, and one that signed people in with Google could not read their Drive.
+
+SqlOS 11.5.0 lets a connection keep those tokens.
+
+- **Keep provider tokens (off by default).** Turn on `StoreProviderTokens` on a GitHub, Google, Microsoft, Apple or custom OIDC connection. After every sign-in through it, new and returning people alike, from the hosted page or a headless UI, SqlOS stores the access token, refresh token, expiry and granted scopes on the person's external identity, protected with ASP.NET Core Data Protection.
+- **One method to read the token.** `SqlOSOidcAuthService.GetProviderAccessTokenAsync(userId, "github")` returns the person's current token. It refreshes a token that is about to expire when the provider issued a refresh token, and returns `null` when there is no usable token. It never throws for a provider failure. There is no HTTP route for it: your endpoint decides whose token a caller may use.
+- **Scopes in code.** `SeedGitHubConnection`, `SeedGoogleConnection` and `SeedMicrosoftConnection` take `scopes` and `storeProviderTokens`, so a connection can ask for `repo` or a Drive scope without a trip to the dashboard. Google gets `access_type=offline` when tokens are kept.
+
+The switch is on all three control planes: the seed, the Admin API (`storeProviderTokens`) and the dashboard (**Keep provider tokens** on the connection). Tokens are never logged, returned by an endpoint, shown in the dashboard or written to audit data. Turning the switch off, signing in with it off, and deleting the user clear them.
+
+This release also fixes headless provider sign-in for people in several organizations. After the provider's callback, the headless UI's request read (`view=organization`) returned an empty list, so the person had nothing to choose. It now returns the organizations, using the `pendingToken` in the UI's address or, when a custom `BuildUiUrl` leaves it out, the browser's continuation cookie.
+
+## Upgrade
+
+```bash
+dotnet add package SqlOS --version 11.5.0
+npm install @sqlos/headless@11.5.0
+```
+
+The schema update adds a `StoreProviderTokens` column to OIDC connections, defaulting to off, and nullable token columns to external identities. Existing connections keep their seed fingerprints and store nothing until you turn the switch on. Keep the Data Protection key ring shared and persisted, as you already do for client secrets. `@sqlos/headless` has no API change.
+
+Read [Call the provider as the person](/docs/authserver/oidc-auth#call-the-provider-as-the-person) for the switch and the read method, [Add GitHub sign-in](/docs/guides/github-oidc) for the `repo` scope example, the [AuthServer API reference](/docs/reference/authserver-api) for the new overloads, and [Build your own login UI](/docs/guides/custom-login-ui) for the organization view after a provider sign-in.
