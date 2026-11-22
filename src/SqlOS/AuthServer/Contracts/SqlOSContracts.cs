@@ -533,7 +533,8 @@ public sealed record SqlOSCreateOidcConnectionRequest(
     string? LogoDataUrl = null,
     bool TrustUpstreamMfa = false,
     List<string>? AcceptedAmrValues = null,
-    List<string>? AcceptedAcrValues = null);
+    List<string>? AcceptedAcrValues = null,
+    bool StoreProviderTokens = false);
 
 public sealed record SqlOSUpdateOidcConnectionRequest(
     string DisplayName,
@@ -558,7 +559,8 @@ public sealed record SqlOSUpdateOidcConnectionRequest(
     string? LogoDataUrl = null,
     bool TrustUpstreamMfa = false,
     List<string>? AcceptedAmrValues = null,
-    List<string>? AcceptedAcrValues = null);
+    List<string>? AcceptedAcrValues = null,
+    bool StoreProviderTokens = false);
 
 public sealed record SqlOSAuthorizationUrlRequest(
     string ConnectionId,
@@ -685,6 +687,37 @@ public sealed record SqlOSCompleteOidcAuthorizationResult(
     /// callers then fall back to conservative local resolution.
     /// </summary>
     public DateTime? UpstreamAuthenticatedAt { get; init; }
+}
+
+/// <summary>
+/// A person's current access token at a social provider, read with
+/// <c>SqlOSOidcAuthService.GetProviderAccessTokenAsync</c>. Hand it only to code that calls the
+/// provider as this person; never return it to a browser. <see cref="ToString"/> leaves the token out.
+/// </summary>
+/// <param name="ConnectionId">The social login connection the person signed in through.</param>
+/// <param name="ProviderType">The provider.</param>
+/// <param name="Subject">The person's stable id at the provider.</param>
+/// <param name="AccessToken">The provider access token.</param>
+/// <param name="ExpiresAt">When it expires (UTC), or null when the provider gave no expiry (GitHub OAuth Apps).</param>
+/// <param name="Scopes">The scopes the provider granted.</param>
+public sealed record SqlOSProviderAccessToken(
+    string ConnectionId,
+    SqlOSOidcProviderType ProviderType,
+    string Subject,
+    string AccessToken,
+    DateTime? ExpiresAt,
+    IReadOnlyList<string> Scopes)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("ConnectionId = ").Append(ConnectionId)
+            .Append(", ProviderType = ").Append(ProviderType)
+            .Append(", Subject = ").Append(Subject)
+            .Append(", AccessToken = [redacted]")
+            .Append(", ExpiresAt = ").Append(ExpiresAt?.ToString("O") ?? "none")
+            .Append(", Scopes = [").Append(string.Join(", ", Scopes)).Append(']');
+        return true;
+    }
 }
 
 public sealed record SqlOSPkceExchangeRequest(

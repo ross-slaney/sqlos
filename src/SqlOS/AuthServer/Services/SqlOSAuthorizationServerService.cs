@@ -1219,6 +1219,35 @@ public sealed class SqlOSAuthorizationServerService
         return await TryMintConsentTokenFromIssuerSessionAsync(authorizationRequest, httpContext, cancellationToken);
     }
 
+    /// <summary>
+    /// The pending organization-selection token the browser's continuation cookie carries for this
+    /// request, or null. Reading it does not consume it; the selection itself does.
+    /// </summary>
+    internal async Task<string?> TryReadPendingTokenFromContinuationCookieAsync(
+        SqlOSAuthorizationRequest authorizationRequest,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var continuationHandle = httpContext.Request.Cookies[BuildContinuationCookieName(authorizationRequest.Id)];
+        if (string.IsNullOrWhiteSpace(continuationHandle))
+        {
+            return null;
+        }
+
+        var continuation = await _cryptoService.FindTemporaryTokenAsync(
+            AuthorizationContinuationPurpose,
+            continuationHandle,
+            cancellationToken);
+        var payload = continuation == null
+            ? null
+            : _cryptoService.DeserializePayload<AuthorizationContinuationPayload>(continuation);
+        return payload != null
+            && string.Equals(payload.AuthorizationRequestId, authorizationRequest.Id, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(payload.PendingToken)
+                ? payload.PendingToken
+                : null;
+    }
+
     private async Task<string?> TryMintConsentTokenFromContinuationCookieAsync(
         SqlOSAuthorizationRequest authorizationRequest,
         HttpContext httpContext,

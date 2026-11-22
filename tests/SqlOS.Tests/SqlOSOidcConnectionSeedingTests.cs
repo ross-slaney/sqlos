@@ -365,6 +365,75 @@ public sealed class SqlOSOidcConnectionSeedingTests
         connection.IsEnabled.Should().BeTrue();
     }
 
+    [TestMethod]
+    public async Task SeedGitHubConnection_WithScopesAndStoredTokens_ReseedsScopesInPlace()
+    {
+        const string callback = "https://app.example.local/sqlos/auth/oidc/callback";
+        using var context = CreateContext();
+        var first = new SqlOSAuthServerOptions();
+        first.SeedGitHubConnection("github-client", "github-secret", [callback], scopes: ["read:user", "user:email", "repo"], storeProviderTokens: true);
+        var (admin, oidc) = CreateServices(context, first);
+        await admin.UpsertSeededOidcConnectionsAsync();
+
+        var connection = await context.Set<SqlOSOidcConnection>().SingleAsync();
+        JsonSerializer.Deserialize<List<string>>(connection.ScopesJson).Should().BeEquivalentTo("read:user", "user:email", "repo");
+        connection.StoreProviderTokens.Should().BeTrue();
+        RequestedScopes(await StartAsync(oidc, connection.Id, callback)).Should().BeEquivalentTo("read:user", "user:email", "repo");
+        var signedIn = await oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+            connection.Id, "example-web", callback, "success:seeded@example.com:n", "verifier", "n", null));
+        (await oidc.GetProviderAccessTokenAsync(signedIn.UserId, "github")).Should().NotBeNull();
+
+        // The next boot seeds different scopes and stops keeping tokens.
+        var second = new SqlOSAuthServerOptions();
+        second.SeedGitHubConnection("github-client", "github-secret", [callback], scopes: ["read:user", "user:email", "repo", "workflow"]);
+        var (rebootedAdmin, rebootedOidc) = CreateServices(context, second);
+        await rebootedAdmin.UpsertSeededOidcConnectionsAsync();
+
+        var reseeded = await context.Set<SqlOSOidcConnection>().AsNoTracking().SingleAsync();
+        reseeded.Id.Should().Be(connection.Id, "re-seeding updates the stored connection in place");
+        JsonSerializer.Deserialize<List<string>>(reseeded.ScopesJson).Should().BeEquivalentTo("read:user", "user:email", "repo", "workflow");
+        reseeded.StoreProviderTokens.Should().BeFalse();
+        RequestedScopes(await StartAsync(rebootedOidc, connection.Id, callback)).Should().BeEquivalentTo("read:user", "user:email", "repo", "workflow");
+        (await context.Set<SqlOSExternalIdentity>().AsNoTracking().SingleAsync()).ProviderAccessTokenEncrypted
+            .Should().BeNull("a seed that stops keeping tokens clears them");
+    }
+
+    [TestMethod]
+    public async Task SeedGoogleAndMicrosoftConnections_WithScopes_StoreThem()
+    {
+        using var context = CreateContext();
+        var options = new SqlOSAuthServerOptions();
+        options.SeedGoogleConnection("google-client", "google-secret", ["https://app.example.local/google"], scopes: ["openid", "email", "https://www.googleapis.com/auth/drive.readonly"], storeProviderTokens: true);
+        options.SeedMicrosoftConnection("microsoft-client", "microsoft-secret", "contoso", ["https://app.example.local/microsoft"], scopes: ["openid", "email", "offline_access"]);
+        var (admin, _) = CreateServices(context, options);
+
+        await admin.UpsertSeededOidcConnectionsAsync();
+
+        var google = await context.Set<SqlOSOidcConnection>().SingleAsync(x => x.ProviderType == SqlOSOidcProviderType.Google);
+        JsonSerializer.Deserialize<List<string>>(google.ScopesJson).Should().Contain("https://www.googleapis.com/auth/drive.readonly");
+        google.StoreProviderTokens.Should().BeTrue();
+        var microsoft = await context.Set<SqlOSOidcConnection>().SingleAsync(x => x.ProviderType == SqlOSOidcProviderType.Microsoft);
+        JsonSerializer.Deserialize<List<string>>(microsoft.ScopesJson).Should().Contain("offline_access");
+        microsoft.MicrosoftTenant.Should().Be("contoso");
+        microsoft.StoreProviderTokens.Should().BeFalse();
+    }
+
+    private static string[] RequestedScopes(SqlOSStartOidcAuthorizationResult started)
+        => Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(started.AuthorizationUrl).Query)["scope"]
+            .ToString()
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+    private static Task<SqlOSStartOidcAuthorizationResult> StartAsync(SqlOSOidcAuthService oidc, string connectionId, string callback)
+        => oidc.StartAuthorizationAsync(new SqlOSStartOidcAuthorizationRequest(
+            connectionId,
+            "person@example.com",
+            "example-web",
+            callback,
+            "state",
+            "nonce",
+            "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+            "S256"));
+
     private static (SqlOSAdminService admin, SqlOSOidcAuthService oidc) CreateServices(
         TestSqlOSInMemoryDbContext context,
         SqlOSAuthServerOptions optionsValue)

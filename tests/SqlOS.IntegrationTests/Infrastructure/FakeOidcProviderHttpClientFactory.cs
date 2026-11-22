@@ -10,8 +10,15 @@ namespace SqlOS.IntegrationTests.Infrastructure;
 
 internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
 {
+    private readonly Func<HttpRequestMessage, HttpResponseMessage?>? _responseOverride;
+
+    public FakeOidcProviderHttpClientFactory(Func<HttpRequestMessage, HttpResponseMessage?>? responseOverride = null)
+    {
+        _responseOverride = responseOverride;
+    }
+
     public HttpClient CreateClient(string name)
-        => new(new FakeOidcProviderHttpMessageHandler())
+        => new(new FakeOidcProviderHttpMessageHandler(_responseOverride))
         {
             BaseAddress = new Uri("https://localhost")
         };
@@ -20,9 +27,21 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
     {
         private static readonly RSA Rsa = RSA.Create(2048);
         private static readonly RsaSecurityKey SigningKey = new(Rsa) { KeyId = "fake-oidc-key" };
+        private readonly Func<HttpRequestMessage, HttpResponseMessage?>? _responseOverride;
+
+        public FakeOidcProviderHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage?>? responseOverride)
+        {
+            _responseOverride = responseOverride;
+        }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            var overrideResponse = _responseOverride?.Invoke(request);
+            if (overrideResponse != null)
+            {
+                return overrideResponse;
+            }
+
             var uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
 
             if (request.Method == HttpMethod.Get && uri.Contains(".well-known/openid-configuration", StringComparison.OrdinalIgnoreCase))
@@ -35,10 +54,71 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                 return Json(HttpStatusCode.OK, new { keys = new[] { BuildJwk() } });
             }
 
+            if (request.Method == HttpMethod.Post && uri.Contains("github.com/login/oauth/access_token", StringComparison.OrdinalIgnoreCase))
+            {
+                var payload = await request.Content!.ReadAsStringAsync(cancellationToken);
+                var form = ParseForm(payload);
+                if (string.Equals(form.GetValueOrDefault("grant_type"), "refresh_token", StringComparison.Ordinal))
+                {
+                    // GitHub answers a refused refresh with 200 and an error body.
+                    var refreshToken = form.GetValueOrDefault("refresh_token") ?? string.Empty;
+                    return refreshToken.StartsWith("refresh|revoked", StringComparison.Ordinal)
+                        ? Json(HttpStatusCode.OK, new { error = "bad_refresh_token", error_description = "The refresh token passed is incorrect or expired." })
+                        : Json(HttpStatusCode.OK, new
+                        {
+                            access_token = $"github-refreshed|{Guid.NewGuid():N}",
+                            token_type = "bearer",
+                            expires_in = 28800,
+                            refresh_token = $"refresh|rotated-{Guid.NewGuid():N}",
+                            scope = ""
+                        });
+                }
+
+                var code = form.GetValueOrDefault("code") ?? string.Empty;
+                if (code.StartsWith("bad", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Json(HttpStatusCode.BadRequest, new { error = "bad_verification_code", error_description = "The code passed is incorrect or expired." });
+                }
+
+                if (code.StartsWith("expiring", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A GitHub App user token: it expires and comes with a refresh token.
+                    return Json(HttpStatusCode.OK, new
+                    {
+                        access_token = $"github|{code}",
+                        token_type = "bearer",
+                        expires_in = 28800,
+                        refresh_token = $"refresh|{code}",
+                        scope = ""
+                    });
+                }
+
+                return Json(HttpStatusCode.OK, new
+                {
+                    access_token = $"github|{code}",
+                    token_type = "bearer",
+                    scope = "read:user,user:email"
+                });
+            }
+
             if (request.Method == HttpMethod.Post && uri.Contains("/token", StringComparison.OrdinalIgnoreCase))
             {
                 var payload = await request.Content!.ReadAsStringAsync(cancellationToken);
                 var form = ParseForm(payload);
+                if (string.Equals(form.GetValueOrDefault("grant_type"), "refresh_token", StringComparison.Ordinal))
+                {
+                    var refreshToken = form.GetValueOrDefault("refresh_token") ?? string.Empty;
+                    return refreshToken.StartsWith("refresh|revoked", StringComparison.Ordinal)
+                        ? Json(HttpStatusCode.BadRequest, new { error = "invalid_grant", error_description = "Token has been expired or revoked." })
+                        : Json(HttpStatusCode.OK, new
+                        {
+                            access_token = $"{ResolveProvider(uri)}-refreshed|{Guid.NewGuid():N}",
+                            token_type = "Bearer",
+                            expires_in = 3600,
+                            refresh_token = $"refresh|rotated-{Guid.NewGuid():N}"
+                        });
+                }
+
                 var code = form.GetValueOrDefault("code") ?? string.Empty;
                 if (code.StartsWith("bad", StringComparison.OrdinalIgnoreCase))
                 {
@@ -58,6 +138,8 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                     access_token = $"{provider}|{code}",
                     token_type = "Bearer",
                     expires_in = 3600,
+                    refresh_token = $"refresh|{code}",
+                    scope = "openid email profile",
                     id_token = CreateIdToken(provider, clientId, parsed.email, parsed.nonce, parsed.isVerified, parsed.mode)
                 });
             }
@@ -96,6 +178,41 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                     }),
                     _ => Json(HttpStatusCode.NotFound, new { error = "userinfo_not_supported" })
                 };
+            }
+
+            if (request.Method == HttpMethod.Get && string.Equals(uri, "https://api.github.com/user", StringComparison.OrdinalIgnoreCase))
+            {
+                var token = request.Headers.Authorization?.Parameter ?? string.Empty;
+                var parts = token.Split('|', 2, StringSplitOptions.None);
+                var parsed = ParseCode(parts.Length > 1 ? parts[1] : "success:octo@example.com:nonce");
+                var login = string.IsNullOrWhiteSpace(parsed.email)
+                    ? "octocat"
+                    : parsed.email.Split('@')[0].Replace(".", "-", StringComparison.OrdinalIgnoreCase);
+
+                return Json(HttpStatusCode.OK, new
+                {
+                    id = 123456789,
+                    login,
+                    name = $"GitHub {login}",
+                    email = (string?)null
+                });
+            }
+
+            if (request.Method == HttpMethod.Get && string.Equals(uri, "https://api.github.com/user/emails", StringComparison.OrdinalIgnoreCase))
+            {
+                var token = request.Headers.Authorization?.Parameter ?? string.Empty;
+                var parts = token.Split('|', 2, StringSplitOptions.None);
+                var parsed = ParseCode(parts.Length > 1 ? parts[1] : "success:octo@example.com:nonce");
+                return Json(HttpStatusCode.OK, new[]
+                {
+                    new
+                    {
+                        email = parsed.email,
+                        primary = true,
+                        verified = parsed.isVerified,
+                        visibility = "private"
+                    }
+                });
             }
 
             return Json(HttpStatusCode.NotFound, new { error = "not_found", url = uri });

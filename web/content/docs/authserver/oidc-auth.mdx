@@ -199,6 +199,51 @@ const { authorizationUrl } = await apiPost("/api/v1/auth/oidc/start", {
 window.location.href = authorizationUrl;
 ```
 
+## Call the provider as the person
+
+A connection can keep the provider's tokens so your server can call the provider's API as the person who signed in: GitHub's API to push a branch, Google Drive, Microsoft Graph. It is off by default. When it is on, SqlOS stores the access token, refresh token, expiry and granted scopes on the person's external identity after every sign-in through that connection, new and returning people alike, from the hosted page or a headless UI. This is the same idea as ASP.NET Core's `SaveTokens`.
+
+Turn it on in code, in the Admin API (`storeProviderTokens`) or with **Keep provider tokens** on the connection in the dashboard, and ask for the scopes the API needs:
+
+```csharp
+options.AuthServer.SeedGitHubConnection(
+    clientId: builder.Configuration["SqlOS:Oidc:GitHub:ClientId"]!,
+    clientSecret: builder.Configuration["SqlOS:Oidc:GitHub:ClientSecret"]!,
+    allowedCallbackUris: [$"{publicOrigin}/sqlos/auth/oidc/callback"],
+    scopes: ["read:user", "user:email", "repo"],
+    storeProviderTokens: true);
+```
+
+`SeedGoogleConnection` and `SeedMicrosoftConnection` take the same `scopes` and `storeProviderTokens` arguments, and `SeedOidcConnection` sets `Scopes` and `StoreProviderTokens` on the seed. Changing the scopes in code updates the stored connection on the next boot. People who signed in before the change keep the scopes they granted until they sign in again.
+
+Read the person's current token on the server with `SqlOSOidcAuthService.GetProviderAccessTokenAsync`:
+
+```csharp
+app.MapPost("/api/repositories/{owner}/{name}/branches", async (
+    string owner, string name, ClaimsPrincipal user,
+    SqlOSOidcAuthService oidc, IHttpClientFactory http, CancellationToken cancellationToken) =>
+{
+    var userId = user.FindFirstValue("sub")!;
+    var github = await oidc.GetProviderAccessTokenAsync(userId, "github", cancellationToken);
+    if (github is null)
+    {
+        return Results.Problem("Sign in with GitHub to continue.", statusCode: 403);
+    }
+
+    using var request = new HttpRequestMessage(HttpMethod.Get, $"https://api.github.com/repos/{owner}/{name}");
+    request.Headers.Authorization = new("Bearer", github.AccessToken);
+    // ...
+}).RequireAuthorization();
+```
+
+- The second argument is the connection's id or the key it was seeded with (`github`, `google`, `microsoft`, or the key you passed to `SeedOidcConnection`).
+- A token that expires within a minute is refreshed first when the provider issued a refresh token, and a rotated refresh token replaces the old one. A token with no expiry, such as a GitHub OAuth App token, is returned as stored.
+- The method returns `null` when there is no usable token: the connection does not keep tokens or is disabled, the user is deleted or inactive, the person never signed in through it with the switch on, the token expired with no refresh token, or the provider refused the refresh. A refused refresh clears the stored tokens and writes a `user.provider_token.refresh_refused` audit event; send the person back through sign-in. A provider that cannot be reached also returns `null` and keeps the tokens. Provider failures never throw.
+- SqlOS only ever returns the token of the user you pass. Your endpoint decides whose token a caller may use.
+- Google issues refresh tokens only for offline access, so SqlOS adds `access_type=offline` to Google's authorize URL when the connection keeps tokens. Google sends the refresh token on the first consent. Microsoft needs the `offline_access` scope.
+
+Tokens are protected with ASP.NET Core Data Protection, the same way SqlOS protects client secrets and calendar tokens, so the key ring must be shared and persisted. They are never logged, never returned by an endpoint, never shown in the dashboard and never written to audit data; `SqlOSProviderAccessToken.ToString()` leaves the token out. Turning the switch off clears every token the connection kept, a sign-in with it off clears that person's token, deleting the user clears theirs, and removing an external identity removes its tokens with it.
+
 ## Provider-specific setup
 
 ### Google
@@ -224,7 +269,7 @@ window.location.href = authorizationUrl;
 1. Create an OAuth App in [GitHub Developer settings](https://github.com/settings/developers)
 2. Set the Authorization callback URL to the SqlOS callback URI
 3. Create the connection with `providerType: "github"`, your GitHub client ID and secret
-4. Keep default scopes so SqlOS can request `read:user` and `user:email`
+4. Keep default scopes so SqlOS can request `read:user` and `user:email`, or add the scopes your app needs (for example `repo`) and keep the provider's tokens to [call GitHub as the person](#call-the-provider-as-the-person)
 
 See [GitHub OIDC](/docs/guides/github-oidc) for dashboard, API, and code-first setup.
 

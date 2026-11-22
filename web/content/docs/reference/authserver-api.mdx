@@ -1165,6 +1165,7 @@ var conn = await adminService.CreateOidcConnectionAsync(
 | `request.AppleKeyId` | `string?` | Apple Sign in with Apple key ID. Required for Apple. |
 | `request.ApplePrivateKeyPem` | `string?` | Apple PKCS#8 private key in PEM form. Required for Apple and encrypted before persistence. |
 | `request.LogoDataUrl` | `string?` | Optional provider-button image data URL. Built-in providers have a default logo when this is null. |
+| `request.StoreProviderTokens` | `bool` | Keep the provider's access token, refresh token, expiry and granted scopes after every sign-in, for [`GetProviderAccessTokenAsync`](#getprovideraccesstokenasync). Defaults to `false`. `UpdateOidcConnectionAsync` takes the same field; turning it off clears every token the connection kept. |
 
 **Returns**
 
@@ -1205,6 +1206,25 @@ options.AuthServer.SeedGitHubConnection(
 | `allowedCallbackUris` | `params string[]` | SqlOS provider callback URIs to allow. Default base path form is `{AuthServer.PublicOrigin}/sqlos/auth/oidc/callback`. |
 
 The seeded connection uses provider type `GitHub`, display name `GitHub`, protocol `OAuthProfile`, default scopes `read:user` and `user:email`, and the built-in GitHub authorization/token/profile endpoints.
+
+An overload takes the scopes to request and whether to keep the provider's tokens:
+
+```csharp
+options.AuthServer.SeedGitHubConnection(
+    clientId: builder.Configuration["SqlOS:Oidc:GitHub:ClientId"]!,
+    clientSecret: builder.Configuration["SqlOS:Oidc:GitHub:ClientSecret"]!,
+    allowedCallbackUris: ["https://your-app.example.com/sqlos/auth/oidc/callback"],
+    scopes: ["read:user", "user:email", "repo"],
+    storeProviderTokens: true);
+```
+
+| Name | Type | Description |
+|------|------|-------------|
+| `allowedCallbackUris` | `IEnumerable<string>` | SqlOS provider callback URIs to allow. |
+| `scopes` | `IEnumerable<string>?` | Scopes to request instead of the defaults. Changing them updates the stored connection on the next boot. |
+| `storeProviderTokens` | `bool` | Keep the provider's tokens for [`GetProviderAccessTokenAsync`](#getprovideraccesstokenasync). Defaults to `false`. |
+
+`SeedGoogleConnection(clientId, clientSecret, allowedCallbackUris, scopes, storeProviderTokens)` and `SeedMicrosoftConnection(clientId, clientSecret, tenant, allowedCallbackUris, scopes, storeProviderTokens)` have the same overload. `SeedOidcConnection` sets `Scopes` and `StoreProviderTokens` on `SqlOSOidcConnectionSeedOptions`.
 
 See [GitHub OIDC](/docs/guides/github-oidc).
 
@@ -1562,6 +1582,41 @@ var result = await oidcService.CompleteAuthorizationAsync(
 | `AuthenticationMethod` | `string` | Provider method: `"google"`, `"microsoft"`, `"apple"`, `"github"`, or `"oidc"` for a custom OIDC provider. |
 | `OrganizationCount` | `int` | Number of organizations available to the resolved user. |
 | `UserCreated` | `bool` | Whether this callback provisioned a new SqlOS user. |
+
+---
+
+### GetProviderAccessTokenAsync
+
+The person's current access token at the provider behind a social login connection, for a server that calls the provider's API as that person. The connection must keep provider tokens (`StoreProviderTokens`).
+
+```csharp
+var token = await oidcService.GetProviderAccessTokenAsync(userId, "github", cancellationToken);
+if (token is not null)
+{
+    request.Headers.Authorization = new("Bearer", token.AccessToken);
+}
+```
+
+**Parameters**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `userId` | `string` | The SqlOS user. Only this user's own token is returned; your endpoint decides who may use it. |
+| `connectionIdOrKey` | `string` | The connection's id, or the key it was seeded with (`github`, `google`, `microsoft`, or a `SeedOidcConnection` key). |
+| `cancellationToken` | `CancellationToken` | Cancels the read. |
+
+**Returns**
+
+`Task<SqlOSProviderAccessToken?>` — `null` when the connection does not keep tokens or is disabled, the user is deleted or inactive, the person has no stored token, the token expired with no refresh token, the provider refused the refresh (the stored tokens are cleared), or the provider could not be reached (the stored tokens are kept). Provider failures never throw. A token that expires within a minute is refreshed first when a refresh token is stored; a token with no expiry (GitHub OAuth Apps) is returned as stored.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ConnectionId` | `string` | The connection. |
+| `ProviderType` | `SqlOSOidcProviderType` | The provider. |
+| `Subject` | `string` | The person's stable id at the provider. |
+| `AccessToken` | `string` | The provider access token. Never return it to a browser. `ToString()` leaves it out. |
+| `ExpiresAt` | `DateTime?` | When it expires (UTC), or `null` when the provider gave no expiry. |
+| `Scopes` | `IReadOnlyList<string>` | The scopes the provider granted. |
 
 ---
 

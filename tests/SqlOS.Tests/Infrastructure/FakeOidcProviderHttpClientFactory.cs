@@ -58,10 +58,39 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
             {
                 var payload = await request.Content!.ReadAsStringAsync(cancellationToken);
                 var form = ParseForm(payload);
+                if (string.Equals(form.GetValueOrDefault("grant_type"), "refresh_token", StringComparison.Ordinal))
+                {
+                    // GitHub answers a refused refresh with 200 and an error body.
+                    var refreshToken = form.GetValueOrDefault("refresh_token") ?? string.Empty;
+                    return refreshToken.StartsWith("refresh|revoked", StringComparison.Ordinal)
+                        ? Json(HttpStatusCode.OK, new { error = "bad_refresh_token", error_description = "The refresh token passed is incorrect or expired." })
+                        : Json(HttpStatusCode.OK, new
+                        {
+                            access_token = $"github-refreshed|{Guid.NewGuid():N}",
+                            token_type = "bearer",
+                            expires_in = 28800,
+                            refresh_token = $"refresh|rotated-{Guid.NewGuid():N}",
+                            scope = ""
+                        });
+                }
+
                 var code = form.GetValueOrDefault("code") ?? string.Empty;
                 if (code.StartsWith("bad", StringComparison.OrdinalIgnoreCase))
                 {
                     return Json(HttpStatusCode.BadRequest, new { error = "bad_verification_code", error_description = "The code passed is incorrect or expired." });
+                }
+
+                if (code.StartsWith("expiring", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A GitHub App user token: it expires and comes with a refresh token.
+                    return Json(HttpStatusCode.OK, new
+                    {
+                        access_token = $"github|{code}",
+                        token_type = "bearer",
+                        expires_in = 28800,
+                        refresh_token = $"refresh|{code}",
+                        scope = ""
+                    });
                 }
 
                 return Json(HttpStatusCode.OK, new
@@ -76,6 +105,20 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
             {
                 var payload = await request.Content!.ReadAsStringAsync(cancellationToken);
                 var form = ParseForm(payload);
+                if (string.Equals(form.GetValueOrDefault("grant_type"), "refresh_token", StringComparison.Ordinal))
+                {
+                    var refreshToken = form.GetValueOrDefault("refresh_token") ?? string.Empty;
+                    return refreshToken.StartsWith("refresh|revoked", StringComparison.Ordinal)
+                        ? Json(HttpStatusCode.BadRequest, new { error = "invalid_grant", error_description = "Token has been expired or revoked." })
+                        : Json(HttpStatusCode.OK, new
+                        {
+                            access_token = $"{ResolveProvider(uri)}-refreshed|{Guid.NewGuid():N}",
+                            token_type = "Bearer",
+                            expires_in = 3600,
+                            refresh_token = $"refresh|rotated-{Guid.NewGuid():N}"
+                        });
+                }
+
                 var code = form.GetValueOrDefault("code") ?? string.Empty;
                 if (code.StartsWith("bad", StringComparison.OrdinalIgnoreCase))
                 {
@@ -95,6 +138,8 @@ internal sealed class FakeOidcProviderHttpClientFactory : IHttpClientFactory
                     access_token = $"{provider}|{code}",
                     token_type = "Bearer",
                     expires_in = 3600,
+                    refresh_token = $"refresh|{code}",
+                    scope = "openid email profile",
                     id_token = CreateIdToken(provider, clientId, parsed.email, parsed.nonce, parsed.isVerified, parsed.mode)
                 });
             }

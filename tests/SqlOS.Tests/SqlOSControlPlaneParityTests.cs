@@ -9,6 +9,8 @@ using Microsoft.AspNetCore.WebUtilities;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
@@ -405,6 +407,85 @@ public sealed class SqlOSControlPlaneParityTests
             (await harness.Oidc.ListEnabledProvidersAsync()).Should().ContainSingle(x => x.DisplayName == "Google");
         }
     }
+
+    [TestMethod]
+    public async Task OidcProviderTokens_CodeServiceAndDashboard_StoreReadAndClearEquivalently()
+    {
+        string[] scopes = ["read:user", "user:email", "repo"];
+        static void FakeProvider(IServiceCollection services)
+        {
+            services.RemoveAll<IHttpClientFactory>();
+            services.AddSingleton<IHttpClientFactory>(new FakeOidcProviderHttpClientFactory());
+        }
+
+        await using var code = await ControlPlaneParityHarness.CreateAsync(
+            options => options.SeedGitHubConnection("provider-client", "provider-secret", [Callback], scopes, storeProviderTokens: true),
+            FakeProvider);
+        await using var service = await ControlPlaneParityHarness.CreateAsync(configureServices: FakeProvider);
+        await using var dashboard = await ControlPlaneParityHarness.CreateAsync(configureServices: FakeProvider);
+
+        await code.ReconcileStartupAsync();
+        await service.Admin.CreateOidcConnectionAsync(GitHubTokenRequest(scopes));
+        var created = await dashboard.PostDashboardAsync(DashboardAdminContracts.OidcConnections, GitHubTokenPayload(scopes, storeProviderTokens: true));
+        created.GetProperty("storeProviderTokens").GetBoolean().Should().BeTrue();
+
+        var projections = new[]
+        {
+            await code.ProjectOidcAsync("GitHub"),
+            await service.ProjectOidcAsync("GitHub"),
+            await dashboard.ProjectOidcAsync("GitHub")
+        };
+        projections[1].Configuration.Should().BeEquivalentTo(projections[0].Configuration);
+        projections[2].Configuration.Should().BeEquivalentTo(projections[0].Configuration);
+        projections[0].Configuration["storeProviderTokens"].Should().Be(bool.TrueString);
+
+        foreach (var harness in new[] { code, service, dashboard })
+        {
+            var connection = await harness.Context.Set<SqlOSOidcConnection>().AsNoTracking().SingleAsync();
+            var signedIn = await harness.Oidc.CompleteAuthorizationAsync(new SqlOSCompleteOidcAuthorizationRequest(
+                connection.Id, "parity-client", Callback, "success:parity@example.com:n", "verifier", "n", null));
+            var token = await harness.Oidc.GetProviderAccessTokenAsync(signedIn.UserId, connection.Id);
+            token!.AccessToken.Should().Be("github|success:parity@example.com:n");
+
+            var listed = await harness.Client.GetStringAsync(DashboardAdminContracts.OidcConnections);
+            listed.Should().NotContain("github|", "the dashboard never sees a stored provider token");
+        }
+
+        var dashboardConnection = await dashboard.Context.Set<SqlOSOidcConnection>().AsNoTracking().SingleAsync();
+        var updated = await dashboard.PutDashboardAsync(
+            $"{DashboardAdminContracts.OidcConnections}/{dashboardConnection.Id}",
+            GitHubTokenPayload(scopes, storeProviderTokens: false));
+        updated.GetProperty("storeProviderTokens").GetBoolean().Should().BeFalse();
+        (await dashboard.Context.Set<SqlOSExternalIdentity>().AsNoTracking().SingleAsync()).ProviderAccessTokenEncrypted
+            .Should().BeNull("turning the switch off from the dashboard clears stored tokens, as the service does");
+    }
+
+    private static SqlOSCreateOidcConnectionRequest GitHubTokenRequest(IReadOnlyList<string> scopes)
+        => new(
+            ProviderType: SqlOSOidcProviderType.GitHub,
+            DisplayName: "GitHub",
+            ClientId: "provider-client",
+            ClientSecret: "provider-secret",
+            AllowedCallbackUris: [Callback],
+            UseDiscovery: true,
+            DiscoveryUrl: null,
+            Issuer: null,
+            AuthorizationEndpoint: null,
+            TokenEndpoint: null,
+            UserInfoEndpoint: null,
+            JwksUri: null,
+            MicrosoftTenant: null,
+            Scopes: [.. scopes],
+            ClaimMapping: null,
+            ClientAuthMethod: null,
+            UseUserInfo: null,
+            StoreProviderTokens: true);
+
+    private static object GitHubTokenPayload(IReadOnlyList<string> scopes, bool storeProviderTokens) => new
+    {
+        providerType = "GitHub", displayName = "GitHub", clientId = "provider-client", clientSecret = "provider-secret",
+        allowedCallbackUris = new[] { Callback }, useDiscovery = true, scopes, storeProviderTokens
+    };
 
     [TestMethod]
     public async Task ScimConnection_CodeServiceAndDashboard_NormalizeAuthenticateAndRedactSecrets()
@@ -1050,10 +1131,11 @@ public sealed class SqlOSControlPlaneParityTests
             "oidcCapable", "oidcDiscoveryUrl", "OIDC capable", "OIDC discovery");
         AssertDashboardContract(
             Section(javascript, "function buildOidcPayload(form)", "function renderStatsGroup"),
-            "providerType", "clientSecret", "displayName");
+            "providerType", "clientSecret", "displayName", "storeProviderTokens");
         AssertDashboardContract(
             Section(javascript, "async function renderAuthOidc()", "async function renderAuthSso()"),
-            "`${authApiBasePath}/oidc-connections`");
+            "`${authApiBasePath}/oidc-connections`",
+            "name=\"storeProviderTokens\"", "item.storeProviderTokens", "Keep provider tokens");
         AssertDashboardContract(
             Section(javascript, "function createPagerState(defaultPageSize, filterKey = \"\")", "async function render()"),
             "cursors: [null]",

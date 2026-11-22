@@ -18,7 +18,8 @@ public interface ISqlOSIdentityDeletionParticipant
 public sealed record SqlOSIdentityDeletionResult(string Id, DateTime DeletedAt, bool AlreadyDeleted);
 
 /// <summary>Soft identity deletion. Identity data, credentials, memberships and audit remain;
-/// deleted identities cannot sign in, and memberships and sessions are deactivated. Trusted hosts authorize their own callers
+/// deleted identities cannot sign in, memberships and sessions are deactivated, and provider tokens kept on the
+/// user's external identities are cleared. Trusted hosts authorize their own callers
 /// before invoking this service. Operator HTTP routes use the same service and host participants.</summary>
 public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext context,
     IEnumerable<ISqlOSIdentityDeletionParticipant> participants)
@@ -36,6 +37,9 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
             SqlOSAuthLifecycleRevocationScope.Offboarding, cancellationToken);
         foreach (var membership in await context.Set<SqlOSMembership>().Where(x => x.UserId == userId).ToListAsync(cancellationToken))
             membership.IsActive = false;
+        // Identity rows stay for audit; the provider tokens kept on them do not.
+        foreach (var identity in await context.Set<SqlOSExternalIdentity>().Where(x => x.UserId == userId && x.ProviderAccessTokenEncrypted != null).ToListAsync(cancellationToken))
+            SqlOSProviderTokenStore.Clear(identity);
         user.IsActive = false;
         user.DeletedAt = now;
         user.UpdatedAt = now;

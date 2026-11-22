@@ -436,6 +436,13 @@ public sealed class SqlOSOidcConnection
     public bool TrustUpstreamMfa { get; set; }
     public string AcceptedAmrValuesJson { get; set; } = "[]";
     public string AcceptedAcrValuesJson { get; set; } = "[]";
+
+    /// <summary>
+    /// Keep the provider's access token, refresh token, expiry and granted scopes on each
+    /// person's external identity after every sign-in, encrypted, so the host can call the
+    /// provider's API as that person. Off by default.
+    /// </summary>
+    public bool StoreProviderTokens { get; set; }
     public string ConfigurationOwner { get; set; } = "dashboard";
     public string? ConfigurationSourceKey { get; set; }
     public string? ConfigurationFingerprint { get; set; }
@@ -457,6 +464,20 @@ public sealed class SqlOSExternalIdentity
     public string Subject { get; set; } = string.Empty;
     public string? Email { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>The provider's access token, protected with Data Protection. Set only when the connection stores provider tokens.</summary>
+    public string? ProviderAccessTokenEncrypted { get; set; }
+
+    /// <summary>The provider's refresh token, protected with Data Protection, when the provider issued one.</summary>
+    public string? ProviderRefreshTokenEncrypted { get; set; }
+
+    /// <summary>When the stored access token expires; null when the provider gave no expiry (GitHub OAuth Apps).</summary>
+    public DateTime? ProviderAccessTokenExpiresAt { get; set; }
+
+    /// <summary>The scopes the provider granted, as a JSON array.</summary>
+    public string? ProviderGrantedScopesJson { get; set; }
+
+    public DateTime? ProviderTokensUpdatedAt { get; set; }
 
     public SqlOSUser? User { get; set; }
     public SqlOSSsoConnection? SsoConnection { get; set; }

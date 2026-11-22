@@ -440,6 +440,8 @@ public sealed partial class SqlOSAdminService
                 seed.AppleTeamId,
                 seed.AppleKeyId);
             var fingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { SourceKey = sourceKey, seed.ProviderType, DisplayName = displayName, seed.ClientId, Callbacks = callbacks, normalized.Protocol, normalized.UseDiscovery, normalized.DiscoveryUrl, normalized.Issuer, normalized.AuthorizationEndpoint, normalized.TokenEndpoint, normalized.UserInfoEndpoint, normalized.JwksUri, normalized.MicrosoftTenant, normalized.Scopes, normalized.ClaimMapping, normalized.ClientAuthMethod, normalized.UseUserInfo, normalized.AppleTeamId, normalized.AppleKeyId, seed.TrustUpstreamMfa, AcceptedAmrValues = NormalizeTrustValues(seed.AcceptedAmrValues), AcceptedAcrValues = NormalizeTrustValues(seed.AcceptedAcrValues) });
+            // Added in 11.5: folded in only when on, so connections seeded before it keep their fingerprint.
+            if (seed.StoreProviderTokens) fingerprint = SqlOSConfigurationOwnershipPolicy.Fingerprint(new { Fingerprint = fingerprint, seed.StoreProviderTokens });
             var outcome = existing == null ? "created" : existing.ConfigurationFingerprint == fingerprint && existing.ConfigurationOrphanedAt == null ? null : "updated";
 
             if (existing == null)
@@ -472,6 +474,7 @@ public sealed partial class SqlOSAdminService
                     TrustUpstreamMfa = seed.TrustUpstreamMfa,
                     AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAmrValues)),
                     AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAcrValues)),
+                    StoreProviderTokens = seed.StoreProviderTokens,
                     ConfigurationOwner = SqlOSConfigurationOwners.Code,
                     ConfigurationSourceKey = sourceKey,
                     ConfigurationFingerprint = fingerprint,
@@ -509,6 +512,7 @@ public sealed partial class SqlOSAdminService
             existing.TrustUpstreamMfa = seed.TrustUpstreamMfa;
             existing.AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAmrValues));
             existing.AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(seed.AcceptedAcrValues));
+            await ApplyStoreProviderTokensAsync(existing, seed.StoreProviderTokens, cancellationToken);
             existing.ConfigurationFingerprint = fingerprint;
             existing.LastReconciledAt = now;
             existing.ConfigurationOrphanedAt = null;
@@ -867,6 +871,7 @@ public sealed partial class SqlOSAdminService
             TrustUpstreamMfa = request.TrustUpstreamMfa,
             AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(request.AcceptedAmrValues)),
             AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(request.AcceptedAcrValues)),
+            StoreProviderTokens = request.StoreProviderTokens,
             IsEnabled = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -932,6 +937,7 @@ public sealed partial class SqlOSAdminService
         connection.TrustUpstreamMfa = request.TrustUpstreamMfa;
         connection.AcceptedAmrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(request.AcceptedAmrValues));
         connection.AcceptedAcrValuesJson = JsonSerializer.Serialize(NormalizeTrustValues(request.AcceptedAcrValues));
+        await ApplyStoreProviderTokensAsync(connection, request.StoreProviderTokens, cancellationToken);
         connection.UpdatedAt = DateTime.UtcNow;
 
         if (!string.IsNullOrWhiteSpace(request.ClientSecret))
@@ -948,6 +954,26 @@ public sealed partial class SqlOSAdminService
 
         await _context.SaveChangesAsync(cancellationToken);
         return connection;
+    }
+
+    /// <summary>
+    /// Sets the connection's switch. Turning it off clears every token the connection kept, so
+    /// an operator who stops storing tokens is not left holding the ones already stored.
+    /// </summary>
+    private async Task ApplyStoreProviderTokensAsync(SqlOSOidcConnection connection, bool storeProviderTokens, CancellationToken cancellationToken)
+    {
+        if (connection.StoreProviderTokens && !storeProviderTokens)
+        {
+            var identities = await _context.Set<SqlOSExternalIdentity>()
+                .Where(x => x.OidcConnectionId == connection.Id && x.ProviderAccessTokenEncrypted != null)
+                .ToListAsync(cancellationToken);
+            foreach (var identity in identities)
+            {
+                SqlOSProviderTokenStore.Clear(identity);
+            }
+        }
+
+        connection.StoreProviderTokens = storeProviderTokens;
     }
 
     public async Task<SqlOSOidcConnection> SetOidcConnectionEnabledAsync(string connectionId, bool isEnabled, CancellationToken cancellationToken = default)
@@ -2131,6 +2157,7 @@ public sealed partial class SqlOSAdminService
                 x.UseUserInfo,
                 x.AppleTeamId,
                 x.AppleKeyId,
+                x.StoreProviderTokens,
                 x.IsEnabled,
                 Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(
                     x.ConfigurationOwner,

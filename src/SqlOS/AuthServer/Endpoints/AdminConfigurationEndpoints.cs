@@ -79,7 +79,8 @@ public static partial class EndpointRouteBuilderExtensions
                 request.LogoDataUrl,
                 request.TrustUpstreamMfa,
                 request.AcceptedAmrValues,
-                request.AcceptedAcrValues), cancellationToken);
+                request.AcceptedAcrValues,
+                request.StoreProviderTokens), cancellationToken);
             return Results.Ok(ToOidcConnectionResponse(connection));
         });
 
@@ -118,7 +119,8 @@ public static partial class EndpointRouteBuilderExtensions
                 request.LogoDataUrl,
                 request.TrustUpstreamMfa,
                 request.AcceptedAmrValues,
-                request.AcceptedAcrValues), cancellationToken);
+                request.AcceptedAcrValues,
+                request.StoreProviderTokens), cancellationToken);
             return Results.Ok(ToOidcConnectionResponse(connection));
         });
 

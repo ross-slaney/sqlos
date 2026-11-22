@@ -27,6 +27,9 @@ public sealed class SqlOSOidcAuthService
     private static readonly IReadOnlyList<string> DefaultGitHubScopes = ["read:user", "user:email"];
     private const string ProviderResponsePublicError = "The social login provider response could not be processed.";
 
+    /// <summary>A stored access token this close to expiry is refreshed before it is handed out.</summary>
+    internal static readonly TimeSpan ProviderTokenRefreshSkew = TimeSpan.FromMinutes(1);
+
     private readonly ISqlOSAuthServerDbContext _context;
     private readonly SqlOSAdminService _adminService;
     private readonly SqlOSCryptoService _cryptoService;
@@ -120,6 +123,13 @@ public sealed class SqlOSOidcAuthService
                 authorizationParameters["login"] = request.Email;
             }
 
+            if (connection.StoreProviderTokens && connection.ProviderType == SqlOSOidcProviderType.Google)
+            {
+                // Google issues a refresh token only for offline access, which is an authorization
+                // parameter rather than a scope. Other providers take it as a scope (offline_access).
+                authorizationParameters["access_type"] = "offline";
+            }
+
             if (connection.ProviderType == SqlOSOidcProviderType.Apple)
             {
                 authorizationParameters["response_mode"] = "form_post";
@@ -179,12 +189,11 @@ public sealed class SqlOSOidcAuthService
 
             var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
             var completed = resolved.Protocol == SqlOSSocialProviderProtocol.OAuthProfile
-                ? new CompletedProviderAuthorization(
-                    await CompleteOAuthProfileAuthorizationAsync(connection, resolved, request, cancellationToken),
-                    SqlOSUpstreamMfaDecision.NotAccepted(false, "evidence_missing"))
+                ? await CompleteOAuthProfileAuthorizationAsync(connection, resolved, request, cancellationToken)
                 : await CompleteOidcAuthorizationAsync(connection, resolved, request, ipAddress, cancellationToken);
             var providerUser = completed.User;
             var provisioned = await ResolveOrProvisionUserAsync(connection, resolved, providerUser, ipAddress, cancellationToken);
+            await KeepProviderTokensAsync(connection, provisioned.Identity, completed.Tokens, resolved.Scopes, cancellationToken);
             var organizations = await _adminService.GetUserOrganizationsAsync(provisioned.User.Id, cancellationToken);
             var organizationId = organizations.Count == 1 ? organizations[0].Id : null;
             var authMethod = connection.ProviderType switch
@@ -260,6 +269,240 @@ public sealed class SqlOSOidcAuthService
         }
     }
 
+    /// <summary>
+    /// The person's current access token at the provider behind a social login connection, for a
+    /// host that calls the provider's API as that person. The connection must store provider tokens
+    /// (<see cref="SqlOSOidcConnection.StoreProviderTokens"/>). An expired token is refreshed first
+    /// when the provider issued a refresh token; a token without an expiry (GitHub OAuth Apps) is
+    /// returned as stored.
+    /// </summary>
+    /// <param name="userId">The SqlOS user. The host decides who may read whose token; SqlOS only
+    /// ever returns this user's own token.</param>
+    /// <param name="connectionIdOrKey">The connection's id, or the stable key it was seeded with
+    /// (<c>github</c> for <c>SeedGitHubConnection</c>).</param>
+    /// <param name="cancellationToken">Cancels the read; a cancelled refresh throws <see cref="OperationCanceledException"/>.</param>
+    /// <returns>The token, or null when there is none: the connection does not store tokens or is
+    /// disabled, the user is deleted or inactive, the person never signed in through it with the
+    /// switch on, the token expired with no refresh token, or the provider refused the refresh (the
+    /// stored tokens are then cleared). A provider that cannot be reached also returns null and
+    /// keeps the stored tokens. Provider failures never throw.</returns>
+    public async Task<SqlOSProviderAccessToken?> GetProviderAccessTokenAsync(
+        string userId,
+        string connectionIdOrKey,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionIdOrKey);
+
+        var connection = await _context.Set<SqlOSOidcConnection>()
+                .FirstOrDefaultAsync(x => x.Id == connectionIdOrKey, cancellationToken)
+            ?? await _context.Set<SqlOSOidcConnection>()
+                .FirstOrDefaultAsync(
+                    x => x.ConfigurationOwner == SqlOSConfigurationOwners.Code && x.ConfigurationSourceKey == connectionIdOrKey,
+                    cancellationToken);
+        if (connection == null || !connection.StoreProviderTokens || !connection.IsEnabled)
+        {
+            return null;
+        }
+
+        var user = await _context.Set<SqlOSUser>().FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
+        if (user == null || !user.IsActive || user.DeletedAt != null)
+        {
+            return null;
+        }
+
+        // A person may hold two identities at one connection (two provider accounts linked by
+        // the same verified email); the one signed in through most recently wins.
+        var identity = await _context.Set<SqlOSExternalIdentity>()
+            .Where(x => x.UserId == userId && x.OidcConnectionId == connection.Id && x.ProviderAccessTokenEncrypted != null)
+            .OrderByDescending(x => x.ProviderTokensUpdatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (identity == null)
+        {
+            return null;
+        }
+
+        var now = DateTime.UtcNow;
+        if (identity.ProviderAccessTokenExpiresAt == null || identity.ProviderAccessTokenExpiresAt > now.Add(ProviderTokenRefreshSkew))
+        {
+            return ToProviderAccessToken(connection, identity);
+        }
+
+        if (string.IsNullOrWhiteSpace(identity.ProviderRefreshTokenEncrypted))
+        {
+            return null;
+        }
+
+        return await RefreshProviderAccessTokenAsync(connection, identity, cancellationToken);
+    }
+
+    private async Task<SqlOSProviderAccessToken?> RefreshProviderAccessTokenAsync(
+        SqlOSOidcConnection connection,
+        SqlOSExternalIdentity identity,
+        CancellationToken cancellationToken)
+    {
+        var usedRefreshToken = identity.ProviderRefreshTokenEncrypted!;
+        ProviderRefreshOutcome outcome;
+        try
+        {
+            var resolved = await ResolveConfigurationAsync(connection, cancellationToken);
+            outcome = await RequestProviderRefreshAsync(connection, resolved, _cryptoService.UnprotectSecret(usedRefreshToken), cancellationToken);
+            if (outcome.Tokens is { } tokens)
+            {
+                SqlOSProviderTokenStore.Store(
+                    identity,
+                    _cryptoService,
+                    tokens.AccessToken,
+                    tokens.RefreshToken,
+                    tokens.ExpiresAt,
+                    tokens.Scope == null ? SqlOSProviderTokenStore.ReadScopes(identity) : SqlOSProviderTokenStore.ParseGrantedScopes(tokens.Scope, []),
+                    DateTime.UtcNow);
+                await _context.SaveChangesAsync(cancellationToken);
+                return ToProviderAccessToken(connection, identity);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The provider could not be reached or answered with something unreadable. The stored
+            // tokens may still be good, so keep them; the exception text is provider text, never a token.
+            _logger.LogWarning(
+                "Refreshing the provider token for connection {ConnectionId} failed: {Reason}.",
+                connection.Id,
+                ex.GetType().Name);
+            return null;
+        }
+
+        // The provider refused the refresh token: revoked, expired, or already rotated by a
+        // concurrent refresh. When another request rotated it, its fresh token is the answer.
+        var stored = await _context.Set<SqlOSExternalIdentity>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == identity.Id, cancellationToken);
+        if (stored?.ProviderRefreshTokenEncrypted != null
+            && !string.Equals(stored.ProviderRefreshTokenEncrypted, usedRefreshToken, StringComparison.Ordinal)
+            && (stored.ProviderAccessTokenExpiresAt == null || stored.ProviderAccessTokenExpiresAt > DateTime.UtcNow.Add(ProviderTokenRefreshSkew)))
+        {
+            return ToProviderAccessToken(connection, stored);
+        }
+
+        SqlOSProviderTokenStore.Clear(identity);
+        await _context.SaveChangesAsync(cancellationToken);
+        await _adminService.RecordAuditAsync(
+            "user.provider_token.refresh_refused",
+            "user",
+            identity.UserId,
+            userId: identity.UserId,
+            data: new
+            {
+                provider = connection.ProviderType.ToString(),
+                oidcConnectionId = connection.Id,
+                status = outcome.StatusCode,
+                error = outcome.Error
+            },
+            cancellationToken: cancellationToken);
+        return null;
+    }
+
+    private async Task<ProviderRefreshOutcome> RequestProviderRefreshAsync(
+        SqlOSOidcConnection connection,
+        ResolvedOidcConfiguration resolved,
+        string refreshToken,
+        CancellationToken cancellationToken)
+    {
+        var httpClient = _httpClientFactory.CreateClient(nameof(SqlOSOidcAuthService));
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, resolved.TokenEndpoint);
+        tokenRequest.Headers.Accept.ParseAdd("application/json");
+        var formValues = new Dictionary<string, string>
+        {
+            ["grant_type"] = "refresh_token",
+            ["refresh_token"] = refreshToken,
+            ["client_id"] = connection.ClientId
+        };
+
+        var clientSecret = CreateClientSecret(connection);
+        if (resolved.Protocol == SqlOSSocialProviderProtocol.Oidc
+            && connection.ClientAuthMethod == SqlOSOidcClientAuthMethod.ClientSecretBasic
+            && connection.ProviderType != SqlOSOidcProviderType.Apple)
+        {
+            var bytes = Encoding.UTF8.GetBytes($"{connection.ClientId}:{clientSecret}");
+            tokenRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", Convert.ToBase64String(bytes));
+        }
+        else
+        {
+            formValues["client_secret"] = clientSecret;
+        }
+
+        tokenRequest.Content = new FormUrlEncodedContent(formValues);
+        using var response = await httpClient.SendAsync(tokenRequest, cancellationToken);
+        var statusCode = (int)response.StatusCode;
+        if (statusCode >= 500)
+        {
+            throw new HttpRequestException($"The provider token endpoint answered {statusCode}.");
+        }
+
+        using var payload = await ReadJsonAsync(response, "OAuth refresh", cancellationToken);
+        var root = payload.RootElement;
+        var error = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("error", out var errorElement) && errorElement.ValueKind == JsonValueKind.String
+            ? errorElement.GetString()
+            : null;
+        var accessToken = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("access_token", out var accessTokenElement) && accessTokenElement.ValueKind == JsonValueKind.String
+            ? accessTokenElement.GetString()
+            : null;
+
+        // GitHub answers a refused refresh with 200 and an error body.
+        if (!response.IsSuccessStatusCode || error != null || string.IsNullOrWhiteSpace(accessToken))
+        {
+            return new ProviderRefreshOutcome(null, statusCode, error ?? "access_token_missing");
+        }
+
+        return new ProviderRefreshOutcome(ReadProviderTokenPayload(root, accessToken!, idToken: null), statusCode, null);
+    }
+
+    /// <summary>
+    /// After a successful sign-in: stores the provider's tokens when the connection keeps them, or
+    /// clears tokens an earlier sign-in stored when it no longer does.
+    /// </summary>
+    private async Task KeepProviderTokensAsync(
+        SqlOSOidcConnection connection,
+        SqlOSExternalIdentity identity,
+        ProviderTokenPayload? tokens,
+        IReadOnlyList<string> requestedScopes,
+        CancellationToken cancellationToken)
+    {
+        if (!connection.StoreProviderTokens || tokens == null)
+        {
+            if (SqlOSProviderTokenStore.HasTokens(identity))
+            {
+                SqlOSProviderTokenStore.Clear(identity);
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+
+            return;
+        }
+
+        SqlOSProviderTokenStore.Store(
+            identity,
+            _cryptoService,
+            tokens.AccessToken,
+            tokens.RefreshToken,
+            tokens.ExpiresAt,
+            SqlOSProviderTokenStore.ParseGrantedScopes(tokens.Scope, requestedScopes),
+            DateTime.UtcNow);
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private SqlOSProviderAccessToken ToProviderAccessToken(SqlOSOidcConnection connection, SqlOSExternalIdentity identity)
+        => new(
+            connection.Id,
+            connection.ProviderType,
+            identity.Subject,
+            _cryptoService.UnprotectSecret(identity.ProviderAccessTokenEncrypted!),
+            identity.ProviderAccessTokenExpiresAt,
+            SqlOSProviderTokenStore.ReadScopes(identity));
+
     private async Task<CompletedProviderAuthorization> CompleteOidcAuthorizationAsync(
         SqlOSOidcConnection connection,
         ResolvedOidcConfiguration resolved,
@@ -285,7 +528,8 @@ public sealed class SqlOSOidcAuthService
         return new CompletedProviderAuthorization(
             providerUser,
             SqlOSUpstreamMfaTrust.EvaluateOidc(connection, idTokenPrincipal),
-            ResolveUpstreamAuthenticatedAt(idTokenPrincipal));
+            ResolveUpstreamAuthenticatedAt(idTokenPrincipal),
+            tokenPayload);
     }
 
     /// <summary>
@@ -328,7 +572,7 @@ public sealed class SqlOSOidcAuthService
         }
     }
 
-    private async Task<ProviderUser> CompleteOAuthProfileAuthorizationAsync(
+    private async Task<CompletedProviderAuthorization> CompleteOAuthProfileAuthorizationAsync(
         SqlOSOidcConnection connection,
         ResolvedOidcConfiguration resolved,
         SqlOSCompleteOidcAuthorizationRequest request,
@@ -340,7 +584,10 @@ public sealed class SqlOSOidcAuthService
         }
 
         var tokenPayload = await ExchangeOAuthProfileCodeAsync(connection, resolved, request, cancellationToken);
-        return await LoadGitHubUserAsync(tokenPayload.AccessToken, cancellationToken);
+        return new CompletedProviderAuthorization(
+            await LoadGitHubUserAsync(tokenPayload.AccessToken, cancellationToken),
+            SqlOSUpstreamMfaDecision.NotAccepted(false, "evidence_missing"),
+            Tokens: tokenPayload);
     }
 
     private async Task<ProviderTokenPayload> ExchangeOAuthProfileCodeAsync(
@@ -379,7 +626,7 @@ public sealed class SqlOSOidcAuthService
             throw new InvalidOperationException("The OAuth provider token response did not include an access token.");
         }
 
-        return new ProviderTokenPayload(accessToken!, null);
+        return ReadProviderTokenPayload(payload.RootElement, accessToken!, idToken: null);
     }
 
     private async Task<ProviderTokenPayload> ExchangeCodeAsync(
@@ -436,7 +683,42 @@ public sealed class SqlOSOidcAuthService
             throw new InvalidOperationException("The OIDC provider token response did not include an ID token.");
         }
 
-        return new ProviderTokenPayload(accessToken, idToken!);
+        return ReadProviderTokenPayload(payload.RootElement, accessToken, idToken);
+    }
+
+    /// <summary>
+    /// The parts of a token response kept when the connection stores provider tokens. GitHub OAuth
+    /// Apps send neither <c>refresh_token</c> nor <c>expires_in</c>; both stay null.
+    /// </summary>
+    private static ProviderTokenPayload ReadProviderTokenPayload(JsonElement root, string accessToken, string? idToken)
+    {
+        string? ReadString(string name)
+            => root.TryGetProperty(name, out var element) && element.ValueKind == JsonValueKind.String
+                ? element.GetString()
+                : null;
+
+        DateTime? expiresAt = null;
+        if (root.TryGetProperty("expires_in", out var expiresElement))
+        {
+            long seconds = 0;
+            var parsed = expiresElement.ValueKind switch
+            {
+                JsonValueKind.Number => expiresElement.TryGetInt64(out seconds),
+                JsonValueKind.String => long.TryParse(expiresElement.GetString(), NumberStyles.None, CultureInfo.InvariantCulture, out seconds),
+                _ => false
+            };
+            if (parsed && seconds > 0)
+            {
+                expiresAt = DateTime.UtcNow.AddSeconds(Math.Min(seconds, (long)TimeSpan.FromDays(3650).TotalSeconds));
+            }
+        }
+
+        return new ProviderTokenPayload(
+            accessToken,
+            idToken,
+            ReadString("refresh_token"),
+            expiresAt,
+            ReadString("scope"));
     }
 
     private async Task<ClaimsPrincipal> ValidateIdTokenAsync(
@@ -723,7 +1005,7 @@ public sealed class SqlOSOidcAuthService
         {
             var existingUser = await _context.Set<SqlOSUser>().FirstAsync(x => x.Id == externalIdentity.UserId, cancellationToken);
             await RequireActiveFederatedUserAsync(existingUser, cancellationToken);
-            return new ProvisionedProviderUser(existingUser, Created: false);
+            return new ProvisionedProviderUser(existingUser, Created: false, externalIdentity);
         }
 
         if (!SqlOSEmailAddress.TryCanonicalize(providerUser.Email, out var providerAddress, out var normalizedEmail))
@@ -812,7 +1094,7 @@ public sealed class SqlOSOidcAuthService
             created = true;
         }
 
-        _context.Set<SqlOSExternalIdentity>().Add(new SqlOSExternalIdentity
+        var identity = new SqlOSExternalIdentity
         {
             Id = _cryptoService.GenerateId("ext"),
             UserId = user.Id,
@@ -821,10 +1103,11 @@ public sealed class SqlOSOidcAuthService
             Subject = providerUser.Subject,
             Email = providerUser.Email,
             CreatedAt = DateTime.UtcNow
-        });
+        };
+        _context.Set<SqlOSExternalIdentity>().Add(identity);
 
         await _context.SaveChangesAsync(cancellationToken);
-        return new ProvisionedProviderUser(user, created);
+        return new ProvisionedProviderUser(user, created, identity);
     }
 
     private async Task RequireActiveFederatedUserAsync(
@@ -1347,7 +1630,14 @@ public sealed class SqlOSOidcAuthService
         }
     }
 
-    private sealed record ProviderTokenPayload(string AccessToken, string? IdToken);
+    private sealed record ProviderTokenPayload(
+        string AccessToken,
+        string? IdToken,
+        string? RefreshToken = null,
+        DateTime? ExpiresAt = null,
+        string? Scope = null);
+
+    private sealed record ProviderRefreshOutcome(ProviderTokenPayload? Tokens, int StatusCode, string? Error);
 
     private sealed record ProviderUser(
         string Subject,
@@ -1360,13 +1650,14 @@ public sealed class SqlOSOidcAuthService
     private sealed record CompletedProviderAuthorization(
         ProviderUser User,
         SqlOSUpstreamMfaDecision UpstreamMfa,
-        DateTime? AuthenticatedAt = null);
+        DateTime? AuthenticatedAt = null,
+        ProviderTokenPayload? Tokens = null);
 
     private sealed record ResolvedEmailClaims(string Email, bool EmailVerified, string Source);
 
     private sealed record AppleCallbackDisplayName(string? FirstName, string? LastName);
 
-    private sealed record ProvisionedProviderUser(SqlOSUser User, bool Created);
+    private sealed record ProvisionedProviderUser(SqlOSUser User, bool Created, SqlOSExternalIdentity Identity);
 
     private sealed record ResolvedOidcConfiguration(
         SqlOSSocialProviderProtocol Protocol,

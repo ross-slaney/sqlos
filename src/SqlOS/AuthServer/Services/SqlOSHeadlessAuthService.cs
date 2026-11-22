@@ -218,6 +218,30 @@ public sealed class SqlOSHeadlessAuthService
                 cancellationToken);
         }
 
+        // A provider sign-in that waits on the organization choice reaches the UI through
+        // /continue with the pending token; the read lists the organizations to choose from, as
+        // the hosted page does. A custom BuildUiUrl that dropped the token falls back to the
+        // browser's continuation cookie.
+        IReadOnlyList<SqlOSOrganizationOption>? organizationSelection = null;
+        if (string.Equals(NormalizeView(requestedView), "organization", StringComparison.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(pendingToken) && httpContext != null)
+            {
+                pendingToken = await _authorizationServerService.TryReadPendingTokenFromContinuationCookieAsync(
+                    authorizationRequest,
+                    httpContext,
+                    cancellationToken);
+            }
+
+            if (!string.IsNullOrWhiteSpace(pendingToken))
+            {
+                organizationSelection = (await _authorizationServerService.GetPendingOrganizationSelectionForLoginAsync(
+                    pendingToken,
+                    authorizationRequest.Id,
+                    cancellationToken)).Organizations;
+            }
+        }
+
         return await BuildViewModelAsync(
             authorizationRequest,
             requestedView,
@@ -226,7 +250,7 @@ public sealed class SqlOSHeadlessAuthService
             email,
             displayName,
             fieldErrors: null,
-            organizationSelection: null,
+            organizationSelection: organizationSelection,
             cancellationToken: cancellationToken,
             consentToken: consentToken);
     }
