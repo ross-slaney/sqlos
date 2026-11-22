@@ -229,6 +229,14 @@ public sealed class SqlOSOidcConnectionSeedOptions
     public List<string> AcceptedAcrValues { get; } = [];
 
     /// <summary>
+    /// Keep the provider's access token, refresh token, expiry and granted scopes after every
+    /// sign-in through this connection, so the host can call the provider's API as the person
+    /// with <c>SqlOSOidcAuthService.GetProviderAccessTokenAsync</c>. Off by default. Reconciled
+    /// on every boot like the rest of the seed; turning it off clears the stored tokens.
+    /// </summary>
+    public bool StoreProviderTokens { get; set; }
+
+    /// <summary>
     /// Whether the connection should be enabled when first seeded. After the connection exists,
     /// manual enable/disable from the dashboard is preserved across restarts.
     /// </summary>

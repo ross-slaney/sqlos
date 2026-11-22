@@ -1192,7 +1192,8 @@
             appleTeamId: form.get("appleTeamId") || null,
             appleKeyId: form.get("appleKeyId") || null,
             applePrivateKeyPem: form.get("applePrivateKeyPem") || null,
-            logoDataUrl: form.get("logoDataUrl") || null
+            logoDataUrl: form.get("logoDataUrl") || null,
+            storeProviderTokens: form.get("storeProviderTokens") === "on"
         };
     }
 
@@ -4173,6 +4174,7 @@
                             <input name="userInfoEndpoint" placeholder="User info endpoint (optional)">
                             <input name="jwksUri" placeholder="JWKS URI (manual custom only)">
                             <label class="checkbox-line"><input name="useUserInfo" type="checkbox" checked> Use user info endpoint</label>
+                            <label class="checkbox-line"><input name="storeProviderTokens" type="checkbox"> Keep provider tokens so your app can call the provider as the person</label>
                             <select name="clientAuthMethod">
                                 <option value="">Default</option>
                                 <option value="ClientSecretPost">ClientSecretPost</option>
@@ -4234,6 +4236,7 @@
                                 { label: "Microsoft tenant", value: item.microsoftTenant || "common" },
                                 { label: "Client auth method", value: item.clientAuthMethod || "Default" },
                                 { label: "Use user info", value: item.useUserInfo ? "Yes" : "No" },
+                                { label: "Keep provider tokens", value: item.storeProviderTokens ? "Yes" : "No" },
                                 { label: "Apple team ID", value: item.appleTeamId },
                                 { label: "Apple key ID", value: item.appleKeyId },
                                 {
@@ -4271,6 +4274,7 @@
                                 <input name="userInfoEndpoint" value="${esc(item.userInfoEndpoint || "")}" placeholder="User info endpoint">
                                 <input name="jwksUri" value="${esc(item.jwksUri || "")}" placeholder="JWKS URI">
                                 <label class="checkbox-line"><input name="useUserInfo" type="checkbox" ${item.useUserInfo ? "checked" : ""}> Use user info endpoint</label>
+                                <label class="checkbox-line"><input name="storeProviderTokens" type="checkbox" ${item.storeProviderTokens ? "checked" : ""}> Keep provider tokens so your app can call the provider as the person</label>
                                 <select name="clientAuthMethod">
                                     <option value="" ${!item.clientAuthMethod ? "selected" : ""}>Default</option>
                                     <option value="ClientSecretPost" ${item.clientAuthMethod === "ClientSecretPost" ? "selected" : ""}>ClientSecretPost</option>

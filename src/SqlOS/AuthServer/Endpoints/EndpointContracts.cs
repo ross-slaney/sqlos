@@ -87,6 +87,7 @@ public static partial class EndpointRouteBuilderExtensions
         connection.TrustUpstreamMfa,
         AcceptedAmrValues = SqlOSAdminService.DeserializeJsonList(connection.AcceptedAmrValuesJson),
         AcceptedAcrValues = SqlOSAdminService.DeserializeJsonList(connection.AcceptedAcrValuesJson),
+        connection.StoreProviderTokens,
         connection.IsEnabled,
         Ownership = SqlOSConfigurationOwnershipPolicy.ToDto(connection.ConfigurationOwner, connection.ConfigurationSourceKey, connection.LastReconciledAt, connection.ConfigurationFingerprint, connection.ConfigurationOrphanedAt),
         connection.CreatedAt,
@@ -117,7 +118,8 @@ public static partial class EndpointRouteBuilderExtensions
         string? LogoDataUrl,
         bool TrustUpstreamMfa = false,
         List<string>? AcceptedAmrValues = null,
-        List<string>? AcceptedAcrValues = null);
+        List<string>? AcceptedAcrValues = null,
+        bool StoreProviderTokens = false);
 
     private sealed record UpdateOidcConnectionRequest(
         string DisplayName,
@@ -142,7 +144,8 @@ public static partial class EndpointRouteBuilderExtensions
         string? LogoDataUrl,
         bool TrustUpstreamMfa = false,
         List<string>? AcceptedAmrValues = null,
-        List<string>? AcceptedAcrValues = null);
+        List<string>? AcceptedAcrValues = null,
+        bool StoreProviderTokens = false);
 
     private sealed record ClientLifecycleRequest(string? Reason);
     private sealed record CreateScimConnectionDashboardRequest(string DisplayName, bool Enabled = true, string? GrantBoundaryResourceId = null);

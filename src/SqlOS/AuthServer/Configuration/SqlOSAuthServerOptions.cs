@@ -228,19 +228,21 @@ public class SqlOSAuthServerOptions
         string clientSecret,
         string? tenant = null,
         params string[] allowedCallbackUris)
-        => SeedOidcConnection(oidc =>
-        {
-            oidc.Key = "microsoft";
-            oidc.ProviderType = SqlOSOidcProviderType.Microsoft;
-            oidc.DisplayName = "Microsoft";
-            oidc.ClientId = clientId;
-            oidc.ClientSecret = clientSecret;
-            oidc.MicrosoftTenant = tenant;
-            oidc.AllowedCallbackUris = allowedCallbackUris
-                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
-                .Select(static uri => uri.Trim())
-                .ToList();
-        });
+        => SeedProviderConnection("microsoft", SqlOSOidcProviderType.Microsoft, "Microsoft", clientId, clientSecret, allowedCallbackUris, scopes: null, storeProviderTokens: false, tenant);
+
+    /// <summary>
+    /// Seed a "Continue with Microsoft" connection with the scopes to request (instead of the
+    /// <c>openid email profile</c> default) and whether to keep the provider's tokens.
+    /// Re-seeding with different scopes updates the stored connection on the next boot.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedMicrosoftConnection(
+        string clientId,
+        string clientSecret,
+        string? tenant,
+        IEnumerable<string> allowedCallbackUris,
+        IEnumerable<string>? scopes = null,
+        bool storeProviderTokens = false)
+        => SeedProviderConnection("microsoft", SqlOSOidcProviderType.Microsoft, "Microsoft", clientId, clientSecret, allowedCallbackUris, scopes, storeProviderTokens, tenant);
 
     /// <summary>
     /// Seed a "Continue with Google" social login connection.
@@ -249,18 +251,20 @@ public class SqlOSAuthServerOptions
         string clientId,
         string clientSecret,
         params string[] allowedCallbackUris)
-        => SeedOidcConnection(oidc =>
-        {
-            oidc.Key = "google";
-            oidc.ProviderType = SqlOSOidcProviderType.Google;
-            oidc.DisplayName = "Google";
-            oidc.ClientId = clientId;
-            oidc.ClientSecret = clientSecret;
-            oidc.AllowedCallbackUris = allowedCallbackUris
-                .Where(static uri => !string.IsNullOrWhiteSpace(uri))
-                .Select(static uri => uri.Trim())
-                .ToList();
-        });
+        => SeedProviderConnection("google", SqlOSOidcProviderType.Google, "Google", clientId, clientSecret, allowedCallbackUris, scopes: null, storeProviderTokens: false);
+
+    /// <summary>
+    /// Seed a "Continue with Google" connection with the scopes to request (instead of the
+    /// <c>openid email profile</c> default) and whether to keep the provider's tokens.
+    /// Re-seeding with different scopes updates the stored connection on the next boot.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedGoogleConnection(
+        string clientId,
+        string clientSecret,
+        IEnumerable<string> allowedCallbackUris,
+        IEnumerable<string>? scopes = null,
+        bool storeProviderTokens = false)
+        => SeedProviderConnection("google", SqlOSOidcProviderType.Google, "Google", clientId, clientSecret, allowedCallbackUris, scopes, storeProviderTokens);
 
     /// <summary>
     /// Seed a "Continue with GitHub" social login connection. GitHub user sign-in is OAuth 2.0
@@ -271,17 +275,49 @@ public class SqlOSAuthServerOptions
         string clientId,
         string clientSecret,
         params string[] allowedCallbackUris)
+        => SeedProviderConnection("github", SqlOSOidcProviderType.GitHub, "GitHub", clientId, clientSecret, allowedCallbackUris, scopes: null, storeProviderTokens: false);
+
+    /// <summary>
+    /// Seed a "Continue with GitHub" connection with the scopes to request (instead of the
+    /// <c>read:user user:email</c> default, for example adding <c>repo</c>) and whether to keep
+    /// the provider's tokens so the host can call GitHub's API as the person. Re-seeding with
+    /// different scopes updates the stored connection on the next boot.
+    /// </summary>
+    public SqlOSAuthServerOptions SeedGitHubConnection(
+        string clientId,
+        string clientSecret,
+        IEnumerable<string> allowedCallbackUris,
+        IEnumerable<string>? scopes = null,
+        bool storeProviderTokens = false)
+        => SeedProviderConnection("github", SqlOSOidcProviderType.GitHub, "GitHub", clientId, clientSecret, allowedCallbackUris, scopes, storeProviderTokens);
+
+    private SqlOSAuthServerOptions SeedProviderConnection(
+        string key,
+        SqlOSOidcProviderType providerType,
+        string displayName,
+        string clientId,
+        string clientSecret,
+        IEnumerable<string> allowedCallbackUris,
+        IEnumerable<string>? scopes,
+        bool storeProviderTokens,
+        string? microsoftTenant = null)
         => SeedOidcConnection(oidc =>
         {
-            oidc.Key = "github";
-            oidc.ProviderType = SqlOSOidcProviderType.GitHub;
-            oidc.DisplayName = "GitHub";
+            oidc.Key = key;
+            oidc.ProviderType = providerType;
+            oidc.DisplayName = displayName;
             oidc.ClientId = clientId;
             oidc.ClientSecret = clientSecret;
+            oidc.MicrosoftTenant = microsoftTenant;
             oidc.AllowedCallbackUris = allowedCallbackUris
                 .Where(static uri => !string.IsNullOrWhiteSpace(uri))
                 .Select(static uri => uri.Trim())
                 .ToList();
+            oidc.Scopes = scopes?
+                .Where(static scope => !string.IsNullOrWhiteSpace(scope))
+                .Select(static scope => scope.Trim())
+                .ToList();
+            oidc.StoreProviderTokens = storeProviderTokens;
         });
 
     public SqlOSAuthServerOptions UseSingleApplication(string name, Action<SqlOSSingleApplicationOptions>? configure = null)

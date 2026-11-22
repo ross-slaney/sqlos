@@ -103,7 +103,9 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
     public SqlOSAuthService Auth { get; }
     public SqlOS.Fga.Interfaces.ISqlOSFgaAuthService Fga { get; }
 
-    public static async Task<ControlPlaneParityHarness> CreateAsync(Action<SqlOSAuthServerOptions>? configure = null)
+    public static async Task<ControlPlaneParityHarness> CreateAsync(
+        Action<SqlOSAuthServerOptions>? configure = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = Environments.Development });
         builder.WebHost.UseTestServer();
@@ -117,6 +119,7 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
             configure?.Invoke(options.AuthServer);
         });
         builder.Services.RemoveAll<IHostedService>();
+        configureServices?.Invoke(builder.Services);
 
         var app = builder.Build();
         await app.StartAsync();
@@ -188,7 +191,9 @@ internal sealed class ControlPlaneParityHarness : IAsyncDisposable
             ["clientId"] = item.ClientId,
             ["discoveryUrl"] = item.DiscoveryUrl,
             ["callbacks"] = CanonicalJsonArray(item.AllowedCallbackUrisJson),
-            ["scopes"] = CanonicalJsonArray(item.ScopesJson)
+            ["scopes"] = CanonicalJsonArray(item.ScopesJson),
+            ["storeProviderTokens"] = item.StoreProviderTokens.ToString(),
+            ["dashboardStoreProviderTokens"] = dashboardItem.GetProperty("storeProviderTokens").GetBoolean().ToString()
         }, item.ConfigurationOwner, ReadEditable(dashboardItem), item.IsEnabled,
             !string.IsNullOrWhiteSpace(item.ClientSecretEncrypted));
     }

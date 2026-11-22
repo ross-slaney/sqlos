@@ -108,7 +108,7 @@ dotnet user-secrets set "SqlOS:PublicOrigin" "https://localhost:5001"
 
 <Callout type="info" title="Seeding behavior">
   - Startup seeds are reconciled on every boot and matched by provider type.
-  - Client ID, callbacks, scopes, and endpoints stay in sync with code.
+  - Client ID, callbacks, scopes, endpoints, and **Keep provider tokens** stay in sync with code.
   - Client secret is updated only when the seed supplies one.
   - A manual dashboard disable survives restarts, so operators can pause GitHub login without changing code.
 </Callout>
@@ -120,6 +120,28 @@ dotnet user-secrets set "SqlOS:PublicOrigin" "https://localhost:5001"
 3. Complete GitHub authorization.
 4. Confirm the user returns to your app with a SqlOS session and tokens.
 5. Check **`/sqlos/admin/auth/users`** and **`/sqlos/admin/auth/sessions`** to confirm the user and session were created.
+
+## 5. Call GitHub as the person (optional)
+
+To push, open pull requests or read private repositories as the person who signed in, ask GitHub for the scopes and keep the token SqlOS receives:
+
+```csharp
+options.AuthServer.SeedGitHubConnection(
+    clientId: builder.Configuration["SqlOS:Oidc:GitHub:ClientId"]!,
+    clientSecret: builder.Configuration["SqlOS:Oidc:GitHub:ClientSecret"]!,
+    allowedCallbackUris: [$"{publicOrigin}/sqlos/auth/oidc/callback"],
+    scopes: ["read:user", "user:email", "repo"],
+    storeProviderTokens: true);
+```
+
+In the dashboard, add the scopes to the connection and check **Keep provider tokens**. Then read the person's token on your server:
+
+```csharp
+var github = await oidc.GetProviderAccessTokenAsync(userId, "github", cancellationToken);
+// github?.AccessToken is a GitHub OAuth token for that person; null means they need to sign in with GitHub.
+```
+
+A GitHub OAuth App token has no expiry and no refresh token, so SqlOS returns it as stored until the person signs in again or revokes the app on GitHub. GitHub then answers your API calls with `401`; send the person back through GitHub sign-in. GitHub App user tokens that expire are refreshed when they are read. See [Call the provider as the person](/docs/authserver/oidc-auth#call-the-provider-as-the-person) for what SqlOS stores and when it clears it.
 
 ## Common failures
 
