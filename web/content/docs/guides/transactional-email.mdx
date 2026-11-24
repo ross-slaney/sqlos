@@ -160,6 +160,46 @@ Choose the event boundary carefully. If a later reshipment should send another e
   Updating the order and calling `SendAsync` are not automatically one atomic operation. If the shipment commit and notification must never diverge, persist an outbox event with the shipment and process it with the same stable idempotency key.
 </Callout>
 
+### Add one-click unsubscribe headers
+
+For mail a recipient can opt out of, such as digests or product updates, pass `ListUnsubscribe` with the per-recipient URLs your application serves. SqlOS writes the RFC 2369 `List-Unsubscribe` header. When you set `OneClickUrl`, it also writes the RFC 8058 `List-Unsubscribe-Post` header. Gmail and Yahoo require both headers from bulk senders.
+
+```csharp
+var token = Uri.EscapeDataString(unsubscribeToken);
+
+await email.SendAsync(new SqlOSSendEmailRequest(
+    TemplateKey: "weekly-digest",
+    To: recipient,
+    Variables: new Dictionary<string, object?>
+    {
+        ["unsubscribeUrl"] = $"https://app.example.com/email/unsubscribe?token={token}"
+    },
+    ListUnsubscribe: new SqlOSEmailListUnsubscribe(
+        OneClickUrl: new Uri($"https://app.example.com/email/unsubscribe/one-click?token={token}"),
+        MailTo: new Uri("mailto:unsubscribe@example.com?subject=unsubscribe"))),
+    ct);
+```
+
+The message carries:
+
+```text
+List-Unsubscribe: <https://app.example.com/email/unsubscribe/one-click?token=...>, <mailto:unsubscribe@example.com?subject=unsubscribe>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+- `OneClickUrl` must be an absolute `https` URI without user info. Mailbox providers send it a `POST` with the form body `List-Unsubscribe=One-Click`. The endpoint must unsubscribe the recipient from that request alone, with no sign-in, confirmation page, or redirect. It must not unsubscribe on `GET`, because link scanners fetch URLs.
+- `MailTo` is optional and must be a `mailto:` URI. With only `MailTo`, SqlOS sends `List-Unsubscribe` without `List-Unsubscribe-Post`, which is not one-click.
+- Use the punycode form of internationalized host names.
+- An invalid value throws `InvalidOperationException` before SqlOS records a delivery or calls the provider.
+
+SqlOS does not store the header URLs on the delivery or in audit events. A body link rendered from a template variable is stored in the text preview like any other substituted value. SqlOS also does not store opt-outs: your endpoint records them, and your application checks them before it calls `SendAsync`. An idempotent replay returns the first delivery and does not send again.
+
+The built-in Azure Communication Services sender passes both headers as ACS custom headers. A custom `ISqlOSEmailSender` receives them in `SqlOSEmailMessage.Headers`. A custom `ISqlOSAuthEmailSender` that SqlOS falls back to receives them in `SqlOSAuthEmailMessage.Headers`. Either sender must copy every entry onto the outgoing message.
+
+<Callout type="warning" title="Check the delivered headers">
+  Mailbox providers offer one-click unsubscribe only when the sending provider's DKIM signature covers both headers and leaves their values unencoded. SqlOS hands the values to the provider unchanged. Send a test message from your production sender domain and inspect its raw headers, for example with **Show original** in Gmail.
+</Callout>
+
 ## 5. Interpret the result correctly
 
 `SendAsync` returns the delivery id, status, template key/version, provider message id, and a sanitized error when submission fails.
@@ -210,7 +250,7 @@ You can edit their copy in **Communications > Email Templates**. Their rendered 
 
 Use [Email Branding](/docs/guides/auth-branding) for shared product identity and colors. Existing `BuildMessage` callbacks and custom `ISqlOSAuthEmailSender` implementations remain the advanced escape hatch for auth-specific layouts or provider behavior.
 
-This subsystem is for operational product email. It does not provide campaigns, subscriber lists, preference management, or marketing-email compliance workflows.
+This subsystem is for operational product email. It carries the `List-Unsubscribe` headers your application builds, but it does not provide campaigns, subscriber lists, opt-out storage, preference management, or marketing-email compliance workflows.
 
 ## 8. Verify the integration
 
@@ -223,6 +263,7 @@ Before production, prove each boundary:
 - a distinct shipment event produces a new delivery;
 - an inactive template cannot be sent or previewed through `ISqlOSTransactionalEmailService`, while the operator dashboard can still preview it;
 - provider failures store only sanitized detail;
+- a send with `ListUnsubscribe` arrives with `List-Unsubscribe` and `List-Unsubscribe-Post` in its raw headers;
 - the three built-in templates suppress secret-bearing rendered content;
 - the dashboard shows the exact template version used.
 

@@ -3,6 +3,7 @@ using Azure.Communication.Email;
 using Microsoft.Extensions.Options;
 using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Interfaces;
+using SqlOS.Email.Services;
 
 namespace SqlOS.AuthServer.Services;
 
@@ -12,12 +13,19 @@ public sealed class SqlOSAcsAuthEmailSender : ISqlOSAuthEmailSender
     private readonly SqlOSEmailOtpOptions _options;
 
     public SqlOSAcsAuthEmailSender(IOptions<SqlOSAuthServerOptions> options)
+        : this(options, clientOptions: null)
+    {
+    }
+
+    internal SqlOSAcsAuthEmailSender(IOptions<SqlOSAuthServerOptions> options, EmailClientOptions? clientOptions)
     {
         _options = options.Value.EmailOtp;
 
         if (_options.IsConfigured)
         {
-            _client = new EmailClient(_options.AzureCommunicationServicesConnectionString!);
+            _client = clientOptions == null
+                ? new EmailClient(_options.AzureCommunicationServicesConnectionString!)
+                : new EmailClient(_options.AzureCommunicationServicesConnectionString!, clientOptions);
         }
     }
 
@@ -40,6 +48,7 @@ public sealed class SqlOSAcsAuthEmailSender : ISqlOSAuthEmailSender
             senderAddress: _options.FromAddress!,
             recipients: new EmailRecipients([new EmailAddress(message.To)]),
             content: content);
+        SqlOSAcsEmailSender.ApplyHeaders(email, message.Headers);
 
         await _client!.SendAsync(WaitUntil.Started, email, cancellationToken);
     }

@@ -24,6 +24,17 @@ ${snippet}
 }`,
   },
   {
+    name: "transactional email one-click unsubscribe", relativePath: "web/content/docs/guides/transactional-email.mdx",
+    heading: "### Add one-click unsubscribe headers", marker: "ListUnsubscribe: new SqlOSEmailListUnsubscribe(",
+    wrap: (snippet) => `using SqlOS.Email.Contracts;
+using SqlOS.Email.Interfaces;
+await Task.CompletedTask;
+static async Task SendDigestAsync(ISqlOSTransactionalEmailService email, string recipient, string unsubscribeToken, CancellationToken ct)
+{
+${snippet}
+}`,
+  },
+  {
     name: "standalone multi-client host", relativePath: "web/content/docs/guides/standalone-identity-server.mdx",
     heading: "## 1. Configure the auth host", marker: "var builder = WebApplication.CreateBuilder(args);",
     wrap: asCompleteProgram,
