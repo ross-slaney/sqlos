@@ -317,6 +317,8 @@ internal sealed partial class PostgreSqlDatabaseProvider : ISqlOSDatabaseProvide
         return $"SELECT CASE WHEN to_regclass('{name}') IS NULL THEN 0 ELSE 1 END AS \"Value\"";
     }
 
+    public string BuildSelectUtcNowSql() => "SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') AS \"Value\"";
+
     public string BuildTableHasRowsSql(string? schema, string table)
         => $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {Table(schema, table)}) THEN 1 ELSE 0 END AS \"Value\"";
 

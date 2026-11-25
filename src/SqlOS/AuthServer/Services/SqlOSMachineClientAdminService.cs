@@ -230,7 +230,7 @@ public sealed class SqlOSMachineClientAdminService
     {
         var (client, account, subject) = await RequireAsync(clientId, cancellationToken);
         EnsureDashboardOwned(account);
-        account.ExpiresAt = DateTime.UtcNow;
+        account.ExpiresAt = await SqlOSDatabase.UtcNowAsync(_context.Database, cancellationToken);
         account.UpdatedAt = account.ExpiresAt.Value;
         client.IsActive = false;
         client.DisabledAt = account.ExpiresAt;

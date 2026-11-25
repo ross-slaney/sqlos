@@ -269,6 +269,55 @@ public sealed class ClientCredentialsIntegrationTests
     }
 
     [TestMethod]
+    public async Task RevokedServiceAccount_RealSql_HasExpiredByTheDatabaseClockWhenRevokeReturns()
+    {
+        // The access checks compare ExpiresAt with the database's clock (EF translates DateTime.UtcNow in a
+        // query to it, as SqlOSFgaPrincipals does). An account ended with the app's clock could still look
+        // active for a moment when the database reads behind the app or rounds down.
+        var context = AspireFixture.SharedContext;
+        var options = Options.Create(AspireFixture.Options);
+        var crypto = new SqlOSCryptoService(context, options, AspireFixture.DataProtectionProvider);
+        var admin = new SqlOSAdminService(context, options, crypto);
+        var machines = new SqlOSMachineClientAdminService(context, admin, crypto, options);
+        var protocol = new SqlOSClientCredentialsService(context, crypto, admin, options);
+        var organization = await admin.CreateOrganizationAsync(new SqlOSCreateOrganizationRequest("Revoke clock", $"revoke-clock-{Guid.NewGuid():N}"));
+
+        async Task<bool> ActiveByTheDatabaseClock(string clientId) => await context.Set<SqlOSFgaServiceAccount>()
+            .AnyAsync(x => x.ClientId == clientId && (x.ExpiresAt == null || x.ExpiresAt > DateTime.UtcNow));
+
+        // On SQL Server the access check's clock is GETUTCDATE(), a datetime: whole milliseconds ending in
+        // 0, 3 or 7. An end time read from it has that shape; one from the app's clock almost never does.
+        async Task EndedByTheDatabaseClock(string clientId)
+        {
+            if (!context.Database.IsSqlServer()) return;
+            var ended = await context.Set<SqlOSFgaServiceAccount>().AsNoTracking()
+                .Where(x => x.ClientId == clientId).Select(x => x.ExpiresAt).SingleAsync();
+            ended.Should().NotBeNull();
+            (ended!.Value.Ticks % TimeSpan.TicksPerMillisecond).Should().Be(0, "the end time is read from GETUTCDATE()");
+            new[] { 0, 3, 7 }.Should().Contain(ended.Value.Millisecond % 10, "the end time is read from GETUTCDATE()");
+        }
+
+        for (var i = 0; i < 10; i++)
+        {
+            var machineId = $"clock-machine-{Guid.NewGuid():N}";
+            await machines.CreateAsync(new SqlOSCreateMachineClientRequest(
+                machineId, "Clock worker", null, $"https://api.example.test/clock/{machineId}", ["jobs.run"], organization.Id, null, []));
+            (await ActiveByTheDatabaseClock(machineId)).Should().BeTrue();
+            await machines.RevokeAsync(machineId);
+            (await ActiveByTheDatabaseClock(machineId)).Should().BeFalse("a revoked machine client is refused by the very next check");
+            await EndedByTheDatabaseClock(machineId);
+
+            var protocolId = $"clock-protocol-{Guid.NewGuid():N}";
+            await machines.CreateAsync(new SqlOSCreateMachineClientRequest(
+                protocolId, "Clock worker", null, $"https://api.example.test/clock/{protocolId}", ["jobs.run"], organization.Id, null, []));
+            (await ActiveByTheDatabaseClock(protocolId)).Should().BeTrue();
+            await protocol.RevokeAsync(protocolId, "admin-1");
+            (await ActiveByTheDatabaseClock(protocolId)).Should().BeFalse("a revoked client-credentials client is refused by the very next check");
+            await EndedByTheDatabaseClock(protocolId);
+        }
+    }
+
+    [TestMethod]
     public async Task ClientCredentials_RealSql_IssuesValidServiceTokenAndRevokesWithoutHumanSession()
     {
         var suffix = Guid.NewGuid().ToString("N");
