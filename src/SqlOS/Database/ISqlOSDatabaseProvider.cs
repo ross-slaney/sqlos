@@ -46,6 +46,10 @@ internal interface ISqlOSDatabaseProvider
     // One save's page-order statements, run in the save's transaction, wrapped for the engine.
     string WrapPageMaintenanceSql(string statements);
     string BuildTableExistsSql(string? schema, string table);
+
+    // The database's current UTC time, read with the same expression the access functions compare
+    // ExpiresAt and EffectiveTo with, so a value written from it has passed for every later check.
+    string BuildSelectUtcNowSql();
     string BuildTableHasRowsSql(string? schema, string table);
     DbParameter CreatePageKeysParameter(string name, IReadOnlyList<object> keys);
     DbParameter CreatePageResourceIdsParameter(string name, IReadOnlyCollection<string> resourceIds);

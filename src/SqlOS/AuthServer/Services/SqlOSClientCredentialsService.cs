@@ -5,6 +5,7 @@ using SqlOS.AuthServer.Configuration;
 using SqlOS.AuthServer.Contracts;
 using SqlOS.AuthServer.Interfaces;
 using SqlOS.AuthServer.Models;
+using SqlOS.Database;
 using SqlOS.Fga.Models;
 
 namespace SqlOS.AuthServer.Services;
@@ -191,7 +192,7 @@ public sealed class SqlOSClientCredentialsService
             $"Machine client '{clientId}'");
         var client = await _context.Set<SqlOSClientApplication>()
             .SingleAsync(x => x.ClientId == clientId, cancellationToken);
-        account.ExpiresAt = DateTime.UtcNow;
+        account.ExpiresAt = await SqlOSDatabase.UtcNowAsync(_context.Database, cancellationToken);
         account.UpdatedAt = account.ExpiresAt.Value;
         var credentials = await _context.Set<SqlOSClientCredential>()
             .Where(x => x.ClientApplicationId == client.Id && x.RevokedAt == null)

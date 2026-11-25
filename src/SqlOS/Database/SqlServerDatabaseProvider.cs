@@ -307,6 +307,8 @@ internal sealed partial class SqlServerDatabaseProvider : ISqlOSDatabaseProvider
         return $"SELECT CASE WHEN OBJECT_ID(N'{name}', N'U') IS NULL THEN 0 ELSE 1 END AS [Value]";
     }
 
+    public string BuildSelectUtcNowSql() => "SELECT GETUTCDATE() AS [Value]";
+
     public string BuildTableHasRowsSql(string? schema, string table)
         => $"SELECT CASE WHEN EXISTS (SELECT 1 FROM {Table(schema, table)}) THEN 1 ELSE 0 END AS [Value]";
 

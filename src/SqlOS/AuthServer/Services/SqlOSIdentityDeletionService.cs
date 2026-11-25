@@ -66,7 +66,8 @@ public sealed class SqlOSIdentityDeletionService(ISqlOSAuthServerDbContext conte
         {
             var accounts = await context.Set<SqlOSFgaServiceAccount>().Where(x => x.Subject!.OrganizationId == organizationId).ToListAsync(cancellationToken);
             var clientIds = accounts.Select(x => x.ClientId).ToList();
-            foreach (var account in accounts) { account.ExpiresAt = now; account.UpdatedAt = now; }
+            var ended = await SqlOSDatabase.UtcNowAsync(context.Database, cancellationToken);
+            foreach (var account in accounts) { account.ExpiresAt = ended; account.UpdatedAt = now; }
             foreach (var client in await context.Set<SqlOSClientApplication>().Where(x => clientIds.Contains(x.ClientId)).ToListAsync(cancellationToken))
             { client.IsActive = false; client.DisabledAt = now; client.DisabledReason = "organization_deleted"; }
         }

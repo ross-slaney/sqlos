@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace SqlOS.Database;
 
@@ -73,6 +74,34 @@ internal static class SqlOSDatabase
 
     public static ISqlOSDatabaseProvider Resolve(DatabaseFacade database)
         => Resolve(database.ProviderName);
+
+    /// <summary>
+    /// The database's current UTC time. Use it for a value that must already have passed when the next
+    /// access check runs, such as a service account ended now: the checks compare with the database's
+    /// clock, which can read behind the app's. Reads in the current transaction. Without a relational
+    /// database it is the app's clock.
+    /// </summary>
+    public static async Task<DateTime> UtcNowAsync(DatabaseFacade database, CancellationToken cancellationToken = default)
+    {
+        if (!database.IsRelational())
+        {
+            return DateTime.UtcNow;
+        }
+
+        await database.OpenConnectionAsync(cancellationToken);
+        try
+        {
+            await using var command = database.GetDbConnection().CreateCommand();
+            command.Transaction = database.CurrentTransaction?.GetDbTransaction();
+            command.CommandText = Resolve(database).BuildSelectUtcNowSql();
+            var value = (DateTime)(await command.ExecuteScalarAsync(cancellationToken))!;
+            return DateTime.SpecifyKind(value, DateTimeKind.Utc);
+        }
+        finally
+        {
+            await database.CloseConnectionAsync();
+        }
+    }
 
     public static IsolationLevel ExclusiveWorkIsolationLevel(DatabaseFacade database)
         => IsPostgreSql(database.ProviderName)
